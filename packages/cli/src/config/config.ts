@@ -33,7 +33,7 @@ import {
   SchemaValidator,
   type ConfigParameters,
   type MCPServerConfig,
-  loadBedrockSecrets,
+  loadQwenSecrets,
 } from '@qwen-code/qwen-code-core';
 import { extensionsCommand } from '../commands/extensions.js';
 import { hooksCommand } from '../commands/hooks.js';
@@ -1517,14 +1517,14 @@ export async function loadCliConfig(
       : undefined;
   }
 
-  const bedrockSecrets = loadBedrockSecrets();
-  for (const [key, value] of Object.entries(bedrockSecrets)) {
+  const qwenSecrets = loadQwenSecrets();
+  for (const [key, value] of Object.entries(qwenSecrets)) {
     if (process.env[key] === undefined) {
       process.env[key] = value;
     }
   }
 
-  const selectedAuthType = AuthType.USE_BEDROCK;
+  const selectedAuthType = AuthType.USE_OPENAI;
 
   // Unified resolution of generation config with source attribution
   const resolvedCliConfig = resolveCliGenerationConfig({

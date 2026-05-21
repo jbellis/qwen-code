@@ -19,7 +19,7 @@ import {
 describe('modelConfigResolver', () => {
   describe('resolveModelConfig', () => {
     describe('OpenAI auth type', () => {
-      it('resolves from CLI with highest priority', () => {
+      it('hardcodes Qwen3 Coder and OpenRouter over CLI/model env', () => {
         const result = resolveModelConfig({
           authType: AuthType.USE_OPENAI,
           cli: {
@@ -39,16 +39,17 @@ describe('modelConfigResolver', () => {
           },
         });
 
-        expect(result.config.model).toBe('cli-model');
-        expect(result.config.apiKey).toBe('cli-key');
-        expect(result.config.baseUrl).toBe('https://cli.example.com');
+        expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
+        expect(result.config.apiKey).toBe('env-key');
+        expect(result.config.baseUrl).toBe('https://openrouter.ai/api/v1');
 
-        expect(result.sources['model'].kind).toBe('cli');
-        expect(result.sources['apiKey'].kind).toBe('cli');
-        expect(result.sources['baseUrl'].kind).toBe('cli');
+        expect(result.sources['authType'].kind).toBe('computed');
+        expect(result.sources['model'].kind).toBe('default');
+        expect(result.sources['apiKey'].kind).toBe('env');
+        expect(result.sources['baseUrl'].kind).toBe('default');
       });
 
-      it('falls back to env when CLI not provided', () => {
+      it('uses OPENROUTER_API_KEY from env', () => {
         const result = resolveModelConfig({
           authType: AuthType.USE_OPENAI,
           cli: {},
@@ -56,37 +57,37 @@ describe('modelConfigResolver', () => {
             model: 'settings-model',
           },
           env: {
-            OPENAI_MODEL: 'env-model',
-            OPENAI_API_KEY: 'env-key',
+            OPENROUTER_API_KEY: 'openrouter-key',
+            OPENAI_API_KEY: 'openai-key',
           },
         });
 
-        expect(result.config.model).toBe('env-model');
-        expect(result.config.apiKey).toBe('env-key');
+        expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
+        expect(result.config.apiKey).toBe('openrouter-key');
+        expect(result.config.apiKeyEnvKey).toBe('OPENROUTER_API_KEY');
+        expect(result.config.baseUrl).toBe('https://openrouter.ai/api/v1');
 
-        expect(result.sources['model'].kind).toBe('env');
         expect(result.sources['apiKey'].kind).toBe('env');
       });
 
-      it('falls back to settings when env not provided', () => {
+      it('falls back to OPENAI_API_KEY for OpenAI-compatible clients', () => {
         const result = resolveModelConfig({
           authType: AuthType.USE_OPENAI,
           cli: {},
-          settings: {
-            model: 'settings-model',
-            apiKey: 'settings-key',
-            baseUrl: 'https://settings.example.com',
+          settings: {},
+          env: {
+            OPENAI_API_KEY: 'openai-key',
           },
-          env: {},
         });
 
-        expect(result.config.model).toBe('settings-model');
-        expect(result.config.apiKey).toBe('settings-key');
-        expect(result.config.baseUrl).toBe('https://settings.example.com');
+        expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
+        expect(result.config.apiKey).toBe('openai-key');
+        expect(result.config.apiKeyEnvKey).toBe('OPENAI_API_KEY');
+        expect(result.config.baseUrl).toBe('https://openrouter.ai/api/v1');
 
-        expect(result.sources['model'].kind).toBe('settings');
-        expect(result.sources['apiKey'].kind).toBe('settings');
-        expect(result.sources['baseUrl'].kind).toBe('settings');
+        expect(result.sources['model'].kind).toBe('default');
+        expect(result.sources['apiKey'].kind).toBe('env');
+        expect(result.sources['baseUrl'].kind).toBe('default');
       });
 
       it('uses default model when nothing provided', () => {
@@ -103,7 +104,7 @@ describe('modelConfigResolver', () => {
         expect(result.sources['model'].kind).toBe('default');
       });
 
-      it('prioritizes modelProvider over CLI', () => {
+      it('ignores modelProvider model/baseUrl for the hardcoded runtime', () => {
         const result = resolveModelConfig({
           authType: AuthType.USE_OPENAI,
           cli: {
@@ -122,16 +123,15 @@ describe('modelConfigResolver', () => {
           },
         });
 
-        expect(result.config.model).toBe('provider-model');
-        expect(result.config.apiKey).toBe('provider-key');
-        expect(result.config.baseUrl).toBe('https://provider.example.com');
+        expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
+        expect(result.config.apiKey).toBeUndefined();
+        expect(result.config.baseUrl).toBe('https://openrouter.ai/api/v1');
 
-        expect(result.sources['model'].kind).toBe('modelProviders');
-        expect(result.sources['apiKey'].kind).toBe('env');
-        expect(result.sources['apiKey'].via?.kind).toBe('modelProviders');
+        expect(result.sources['model'].kind).toBe('default');
+        expect(result.sources['baseUrl'].kind).toBe('default');
       });
 
-      it('reads QWEN_MODEL as fallback for OPENAI_MODEL', () => {
+      it('ignores QWEN_MODEL and OPENAI_MODEL env overrides', () => {
         const result = resolveModelConfig({
           authType: AuthType.USE_OPENAI,
           cli: {},
@@ -142,8 +142,8 @@ describe('modelConfigResolver', () => {
           },
         });
 
-        expect(result.config.model).toBe('qwen-model');
-        expect(result.sources['model'].envKey).toBe('QWEN_MODEL');
+        expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
+        expect(result.sources['model'].kind).toBe('default');
       });
     });
 
@@ -901,17 +901,7 @@ describe('modelConfigResolver', () => {
   });
 
   describe('[Regression] issue-4219 — env-var-only path must call defaultModalities()', () => {
-    it('[Regression] env-var-only path: modalities auto-detected for qwen3.6-35b-a3b', () => {
-      // REPRODUCES issue-4219:
-      // When the model is supplied only via OPENAI_MODEL (no modelProviders entry),
-      // resolveGenerationConfig() iterates MODEL_GENERATION_CONFIG_FIELDS but never
-      // calls defaultModalities(). This leaves config.modalities undefined, causing
-      // image attachments to be silently dropped with an "Unsupported <modality>"
-      // message even though the model supports images.
-      //
-      // The modelRegistry path (resolveModelConfig -> resolveModelConfig in modelRegistry.ts)
-      // and the modelsConfig path (applyResolvedModelDefaults) both call defaultModalities()
-      // when generationConfig.modalities is undefined. The env-var-only path does not.
+    it('hardcoded OpenRouter path ignores OPENAI_MODEL and computes modalities for Qwen3 Coder', () => {
       const result = resolveModelConfig({
         authType: AuthType.USE_OPENAI,
         cli: {},
@@ -924,14 +914,9 @@ describe('modelConfigResolver', () => {
         // No modelProvider — this is the env-var-only path
       });
 
-      expect(result.config.model).toBe('qwen3.6-35b-a3b');
-
-      // The qwen3.6-35b pattern in modalityDefaults.ts maps to { image: true, video: true }.
-      // The env-var-only path must auto-detect this — just as the modelProviders path does
-      // in modelsConfig.ts applyResolvedModelDefaults() lines 791-797.
-      expect(result.config.modalities).toBeDefined();
-      expect(result.config.modalities?.image).toBe(true);
-      expect(result.config.modalities?.video).toBe(true);
+      expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
+      expect(result.config.baseUrl).toBe('https://openrouter.ai/api/v1');
+      expect(result.config.modalities).toEqual({});
       expect(result.sources['modalities'].kind).toBe('computed');
     });
 
@@ -973,7 +958,7 @@ describe('modelConfigResolver', () => {
       });
 
       expect(result.config.model).toBe(DEFAULT_QWEN_MODEL);
-      expect(result.config.modalities).toEqual({ image: true, video: true });
+      expect(result.config.modalities).toEqual({});
       expect(result.sources['modalities'].kind).toBe('computed');
     });
 
