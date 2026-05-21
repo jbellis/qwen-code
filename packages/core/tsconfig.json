@@ -2,10 +2,12 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
+    "baseUrl": ".",
     "lib": ["DOM", "DOM.Iterable", "ES2023"],
     "composite": true,
     "types": ["node", "vitest/globals"],
     "paths": {
+      "@qwen-code/qwen-code-core": ["./index.ts"],
       "@lydell/node-pty": ["../../node_modules/@lydell/node-pty/node-pty.d.ts"]
     }
   },

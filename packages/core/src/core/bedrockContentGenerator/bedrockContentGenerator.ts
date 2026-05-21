@@ -103,17 +103,10 @@ export class BedrockContentGenerator implements ContentGenerator {
     const region = resolveBedrockRegion();
     const encodedModelId = encodeURIComponent(BEDROCK_MODEL_ID);
     const url = `https://bedrock-runtime.${region}.amazonaws.com/model/${encodedModelId}/invoke`;
-    const { system, messages } = this.converter.convertGeminiRequestToAnthropic(
-      request,
-      {
-        enableCacheControl: false,
-      },
-    );
+    const { system, messages } =
+      this.converter.convertGeminiRequestToAnthropic(request);
     const tools = request.config?.tools
-      ? await this.converter.convertGeminiToolsToAnthropic(
-          request.config.tools,
-          { enableCacheControl: false },
-        )
+      ? await this.converter.convertGeminiToolsToAnthropic(request.config.tools)
       : undefined;
 
     const body = JSON.stringify({
