@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { EnterWorktreeTool } from './enter-worktree.js';
 import { ExitWorktreeTool } from './exit-worktree.js';
 import type { Config } from '../config/config.js';
@@ -172,6 +173,70 @@ describe('EnterWorktreeTool.execute', () => {
       .execute(new AbortController().signal);
     expect(result.error?.message).toMatch(/not a git repository/i);
     await fs.rm(cwd, { recursive: true, force: true });
+  });
+
+  it('activates the Bifrost workspace for the created worktree', async () => {
+    const fs = await import('node:fs/promises');
+    const pathMod = await import('node:path');
+    const os = await import('node:os');
+    const repoRoot = await fs.mkdtemp(
+      pathMod.join(os.tmpdir(), 'qwen-enter-wt-'),
+    );
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+      execFileSync('git', ['config', 'user.email', 't@e.com'], {
+        cwd: repoRoot,
+      });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: repoRoot });
+      execFileSync('git', ['config', 'commit.gpgsign', 'false'], {
+        cwd: repoRoot,
+      });
+      await fs.writeFile(pathMod.join(repoRoot, 'README.md'), 'hi\n');
+      execFileSync('git', ['add', '.'], { cwd: repoRoot });
+      execFileSync('git', ['commit', '-q', '-m', 'init', '--no-verify'], {
+        cwd: repoRoot,
+      });
+
+      const execute = vi.fn(async () => ({
+        llmContent: 'ok',
+        returnDisplay: 'ok',
+      }));
+      const build = vi.fn((params: object) => ({
+        execute,
+        getDescription: () => '',
+        toolLocations: () => [],
+        getDefaultPermission: async () => 'allow' as const,
+        getConfirmationDetails: async () => {
+          throw new Error('not used');
+        },
+        params,
+      }));
+      const ensureTool = vi.fn(async () => ({ build }));
+      const cfg = {
+        getTargetDir: () => repoRoot,
+        getSessionId: () => 'mock-session-id',
+        getToolRegistry: () => ({
+          ensureTool,
+          discoverToolsForServer: vi.fn(),
+        }),
+      } as unknown as Config;
+
+      const result = await new EnterWorktreeTool(cfg)
+        .build({ name: 'bifrost-sync' })
+        .execute(new AbortController().signal);
+
+      expect(result.error).toBeUndefined();
+      const worktreePath = await fs.realpath(
+        new GitWorktreeService(repoRoot).getUserWorktreePath('bifrost-sync'),
+      );
+      expect(ensureTool).toHaveBeenCalledWith(
+        'mcp__bifrost__activate_workspace',
+      );
+      expect(build).toHaveBeenCalledWith({ workspace_path: worktreePath });
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      await fs.rm(repoRoot, { recursive: true, force: true });
+    }
   });
 });
 

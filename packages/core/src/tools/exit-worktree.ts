@@ -27,6 +27,7 @@ import {
 import * as fs from 'node:fs/promises';
 import { isNodeError } from '../utils/errors.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
+import { activateBifrostWorkspace } from './bifrost-workspace.js';
 
 const debugLogger = createDebugLogger('EXIT_WORKTREE');
 
@@ -138,7 +139,7 @@ class ExitWorktreeInvocation extends BaseToolInvocation<
     return details;
   }
 
-  async execute(_signal: AbortSignal): Promise<ToolResult> {
+  async execute(signal: AbortSignal): Promise<ToolResult> {
     // Mirror `enter_worktree`: anchor at the repo top-level so we look
     // for the worktree under the same directory it was created in.
     // Otherwise launching `qwen` from a subdirectory of a monorepo would
@@ -182,6 +183,7 @@ class ExitWorktreeInvocation extends BaseToolInvocation<
     }
 
     if (this.params.action === 'keep') {
+      await activateBifrostWorkspace(this.config, projectRoot, signal);
       // Phase C update: preserve the sidecar on `keep`. `keep` means
       // "the worktree directory and branch remain on disk so it can be
       // revisited later" — clearing the persisted binding would force
@@ -296,6 +298,7 @@ class ExitWorktreeInvocation extends BaseToolInvocation<
       // delete still refused — most likely a race where new commits
       // landed between the checks. Be loud rather than force-deleting.
       await this.maybeClearWorktreeSession();
+      await activateBifrostWorkspace(this.config, projectRoot, signal);
       const output: ExitWorktreeOutput = {
         action: 'remove',
         worktreePath,
@@ -316,6 +319,7 @@ class ExitWorktreeInvocation extends BaseToolInvocation<
     );
 
     await this.maybeClearWorktreeSession();
+    await activateBifrostWorkspace(this.config, projectRoot, signal);
     const output: ExitWorktreeOutput = {
       action: 'remove',
       worktreePath,

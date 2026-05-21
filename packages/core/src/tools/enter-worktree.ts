@@ -14,6 +14,7 @@ import {
 } from '../services/gitWorktreeService.js';
 import { writeWorktreeSession } from '../services/worktreeSessionService.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
+import { activateBifrostWorkspace } from './bifrost-workspace.js';
 
 const debugLogger = createDebugLogger('ENTER_WORKTREE');
 
@@ -67,7 +68,7 @@ class EnterWorktreeInvocation extends BaseToolInvocation<
       : 'Enter a new worktree';
   }
 
-  async execute(_signal: AbortSignal): Promise<ToolResult> {
+  async execute(signal: AbortSignal): Promise<ToolResult> {
     const cwd = this.config.getTargetDir();
 
     // Refuse nested worktree creation. If the caller's cwd is itself
@@ -208,6 +209,8 @@ class EnterWorktreeInvocation extends BaseToolInvocation<
         `enter_worktree: failed to write WorktreeSession sidecar: ${error}`,
       );
     }
+
+    await activateBifrostWorkspace(this.config, result.worktree.path, signal);
 
     const output: EnterWorktreeOutput = {
       worktreePath: result.worktree.path,

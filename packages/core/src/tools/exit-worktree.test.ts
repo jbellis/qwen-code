@@ -215,15 +215,37 @@ describe('ExitWorktreeTool', () => {
 
     it('keep returns success and leaves the worktree + branch intact', async () => {
       const wtPath = await provisionWorktree('keepme');
+      const execute = vi.fn(async () => ({
+        llmContent: 'ok',
+        returnDisplay: 'ok',
+      }));
+      const build = vi.fn((params: object) => ({
+        execute,
+        getDescription: () => '',
+        toolLocations: () => [],
+        getDefaultPermission: async () => 'allow' as const,
+        getConfirmationDetails: async () => {
+          throw new Error('not used');
+        },
+        params,
+      }));
       const cfg = {
         getTargetDir: () => repoRoot,
         getSessionId: () => 'session-creator',
+        getToolRegistry: () => ({
+          ensureTool: vi.fn(async () => ({ build })),
+          discoverToolsForServer: vi.fn(),
+        }),
       } as unknown as Config;
       const exit = new ExitWorktreeTool(cfg);
       const result = await exit
         .build({ name: 'keepme', action: 'keep' })
         .execute(new AbortController().signal);
       expect(result.error).toBeUndefined();
+      expect(build).toHaveBeenCalledWith({
+        workspace_path: await fs.realpath(repoRoot),
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
       await expect(fs.access(wtPath)).resolves.toBeUndefined();
       const branches = execFileSync('git', ['branch', '--list'], {
         cwd: repoRoot,
