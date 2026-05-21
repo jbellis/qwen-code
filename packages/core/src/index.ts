@@ -20,6 +20,7 @@ export {
   DEFAULT_QWEN_MODEL,
   DEFAULT_QWEN_FLASH_MODEL,
   DEFAULT_QWEN_EMBEDDING_MODEL,
+  DEFAULT_BEDROCK_MODEL,
   MAINLINE_CODER_MODEL,
 } from './config/models.js';
 export {
@@ -56,6 +57,7 @@ export * from './output/types.js';
 
 export * from './core/client.js';
 export * from './core/contentGenerator.js';
+export * from './core/bedrockContentGenerator/index.js';
 export * from './core/coreToolScheduler.js';
 export * from './core/permissionFlow.js';
 export * from './core/permission-helpers.js';

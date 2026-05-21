@@ -9,6 +9,8 @@ import {
   type Config,
   type ModelProvidersConfig,
   type ProviderModelConfig,
+  BEDROCK_API_KEY_ENV,
+  loadBedrockBearerToken,
 } from '@qwen-code/qwen-code-core';
 import { loadEnvironment, loadSettings, type Settings } from './settings.js';
 import { t } from '../i18n/index.js';
@@ -21,6 +23,7 @@ const DEFAULT_ENV_KEYS: Record<string, string> = {
   [AuthType.USE_ANTHROPIC]: 'ANTHROPIC_API_KEY',
   [AuthType.USE_GEMINI]: 'GEMINI_API_KEY',
   [AuthType.USE_VERTEX_AI]: 'GOOGLE_API_KEY',
+  [AuthType.USE_BEDROCK]: BEDROCK_API_KEY_ENV,
 };
 
 /**
@@ -199,6 +202,16 @@ export function validateAuthMethod(
     // Block new OAuth setups; existing cached tokens still work until server rejects them.
     return t(
       'Qwen OAuth free tier was discontinued on 2026-04-15. Run /auth to switch to Coding Plan, OpenRouter, Fireworks AI, or another provider.',
+    );
+  }
+
+  if (authMethod === AuthType.USE_BEDROCK) {
+    if (loadBedrockBearerToken()) {
+      return null;
+    }
+    return t(
+      'Missing Bedrock bearer token. Set {{envKeyHint}} or ~/.secrets/aws_bearer_token_bedrock.',
+      { envKeyHint: BEDROCK_API_KEY_ENV },
     );
   }
 

@@ -34,6 +34,7 @@ describe('validateAuthMethod', () => {
     delete process.env['ANTHROPIC_API_KEY'];
     delete process.env['ANTHROPIC_BASE_URL'];
     delete process.env['GOOGLE_API_KEY'];
+    delete process.env['AWS_BEARER_TOKEN_BEDROCK'];
   });
 
   it('should return null for USE_OPENAI with default env key', () => {
@@ -167,6 +168,17 @@ describe('validateAuthMethod', () => {
     process.env['GOOGLE_API_KEY_VERTEX'] = 'vertex-key';
 
     expect(validateAuthMethod(AuthType.USE_VERTEX_AI)).toBeNull();
+  });
+
+  it('should return null for USE_BEDROCK with bearer token env key', () => {
+    process.env['AWS_BEARER_TOKEN_BEDROCK'] = 'bedrock-token';
+    expect(validateAuthMethod(AuthType.USE_BEDROCK)).toBeNull();
+  });
+
+  it('should return an error for USE_BEDROCK without bearer token', () => {
+    const result = validateAuthMethod(AuthType.USE_BEDROCK);
+    expect(result).toContain('AWS_BEARER_TOKEN_BEDROCK');
+    expect(result).toContain('~/.secrets/aws_bearer_token_bedrock');
   });
 
   it('should use config.getModelsConfig().getModel() when Config is provided', () => {

@@ -13,6 +13,7 @@ import {
 import { GoogleGenAI } from '@google/genai';
 import type { Config } from '../config/config.js';
 import { LoggingContentGenerator } from './loggingContentGenerator/index.js';
+import { BedrockContentGenerator } from './bedrockContentGenerator/index.js';
 
 vi.mock('@google/genai');
 
@@ -80,6 +81,28 @@ describe('createContentGenerator', () => {
       },
     });
     expect(generator).toBeInstanceOf(LoggingContentGenerator);
+  });
+
+  it('should create a Bedrock content generator for Bedrock auth', async () => {
+    const mockConfig = {
+      getUsageStatisticsEnabled: () => false,
+      getContentGeneratorConfig: () => ({}),
+      getCliVersion: () => '1.0.0',
+      getProxy: () => undefined,
+    } as unknown as Config;
+
+    const generator = await createContentGenerator(
+      {
+        model: 'ignored-model',
+        apiKey: 'bedrock-token',
+        authType: AuthType.USE_BEDROCK,
+      },
+      mockConfig,
+    );
+
+    expect(generator).toBeInstanceOf(LoggingContentGenerator);
+    const wrapped = (generator as LoggingContentGenerator).getWrapped();
+    expect(wrapped).toBeInstanceOf(BedrockContentGenerator);
   });
 });
 

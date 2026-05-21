@@ -20,6 +20,10 @@ import type {
   ConfigSources,
 } from '../utils/configResolver.js';
 import {
+  BEDROCK_API_KEY_ENV,
+  loadBedrockBearerToken,
+} from './bedrockContentGenerator/secrets.js';
+import {
   getDefaultApiKeyEnvVar,
   getDefaultModelEnvVar,
   MissingAnthropicBaseUrlEnvError,
@@ -58,6 +62,7 @@ export enum AuthType {
   USE_GEMINI = 'gemini',
   USE_VERTEX_AI = 'vertex-ai',
   USE_ANTHROPIC = 'anthropic',
+  USE_BEDROCK = 'bedrock',
 }
 
 /**
@@ -247,6 +252,11 @@ export function validateModelConfig(
     return { valid: true, errors: [] };
   }
 
+  if (config.authType === AuthType.USE_BEDROCK && !config.apiKey) {
+    config.apiKey = loadBedrockBearerToken();
+    config.apiKeyEnvKey = BEDROCK_API_KEY_ENV;
+  }
+
   // API key is required for all other auth types
   if (!config.apiKey) {
     if (isStrictModelProvider) {
@@ -360,6 +370,12 @@ export async function createContentGenerator(
       './anthropicContentGenerator/index.js'
     );
     baseGenerator = createAnthropicContentGenerator(generatorConfig, config);
+  } else if (authType === AuthType.USE_BEDROCK) {
+    const { createBedrockContentGenerator } = await import(
+      './bedrockContentGenerator/index.js'
+    );
+    generatorConfig.model = 'anthropic.claude-sonnet-4-6';
+    baseGenerator = createBedrockContentGenerator(generatorConfig, config);
   } else if (
     authType === AuthType.USE_GEMINI ||
     authType === AuthType.USE_VERTEX_AI

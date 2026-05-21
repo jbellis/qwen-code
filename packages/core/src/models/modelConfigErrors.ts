@@ -10,6 +10,8 @@ export function getDefaultApiKeyEnvVar(authType: string | undefined): string {
       return 'OPENAI_API_KEY';
     case 'anthropic':
       return 'ANTHROPIC_API_KEY';
+    case 'bedrock':
+      return 'AWS_BEARER_TOKEN_BEDROCK';
     case 'gemini':
       return 'GEMINI_API_KEY';
     case 'vertex-ai':
@@ -25,6 +27,8 @@ export function getDefaultModelEnvVar(authType: string | undefined): string {
       return 'OPENAI_MODEL';
     case 'anthropic':
       return 'ANTHROPIC_MODEL';
+    case 'bedrock':
+      return 'BEDROCK_MODEL_ID';
     case 'gemini':
       return 'GEMINI_MODEL';
     case 'vertex-ai':

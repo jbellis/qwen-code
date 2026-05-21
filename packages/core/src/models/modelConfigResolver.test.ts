@@ -10,7 +10,11 @@ import {
   validateModelConfig,
 } from './modelConfigResolver.js';
 import { AuthType } from '../core/contentGenerator.js';
-import { DEFAULT_QWEN_MODEL, MAINLINE_CODER_MODEL } from '../config/models.js';
+import {
+  DEFAULT_BEDROCK_MODEL,
+  DEFAULT_QWEN_MODEL,
+  MAINLINE_CODER_MODEL,
+} from '../config/models.js';
 
 describe('modelConfigResolver', () => {
   describe('resolveModelConfig', () => {
@@ -140,6 +144,47 @@ describe('modelConfigResolver', () => {
 
         expect(result.config.model).toBe('qwen-model');
         expect(result.sources['model'].envKey).toBe('QWEN_MODEL');
+      });
+    });
+
+    describe('Bedrock auth type', () => {
+      it('hardcodes Sonnet and uses the Bedrock bearer token env key', () => {
+        const result = resolveModelConfig({
+          authType: AuthType.USE_BEDROCK,
+          cli: {
+            model: 'ignored-cli-model',
+            apiKey: 'cli-key',
+          },
+          settings: {
+            model: 'ignored-settings-model',
+            apiKey: 'settings-key',
+          },
+          env: {
+            AWS_BEARER_TOKEN_BEDROCK: 'env-bedrock-token',
+          },
+        });
+
+        expect(result.config.model).toBe(DEFAULT_BEDROCK_MODEL);
+        expect(result.config.apiKey).toBe('env-bedrock-token');
+        expect(result.config.apiKeyEnvKey).toBe('AWS_BEARER_TOKEN_BEDROCK');
+        expect(result.config.authType).toBe(AuthType.USE_BEDROCK);
+        expect(result.sources['model'].kind).toBe('default');
+        expect(result.sources['apiKey'].kind).toBe('env');
+      });
+
+      it('does not use Anthropic API key for Bedrock', () => {
+        const result = resolveModelConfig({
+          authType: AuthType.USE_BEDROCK,
+          cli: {},
+          settings: {},
+          env: {
+            ANTHROPIC_API_KEY: 'anthropic-key',
+          },
+        });
+
+        expect(result.config.model).toBe(DEFAULT_BEDROCK_MODEL);
+        expect(result.config.apiKey).toBeUndefined();
+        expect(result.config.apiKeyEnvKey).toBe('AWS_BEARER_TOKEN_BEDROCK');
       });
     });
 

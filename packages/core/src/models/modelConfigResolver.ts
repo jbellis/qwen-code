@@ -20,7 +20,11 @@
 
 import { AuthType } from '../core/contentGenerator.js';
 import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
-import { DEFAULT_QWEN_MODEL } from '../config/models.js';
+import { DEFAULT_BEDROCK_MODEL, DEFAULT_QWEN_MODEL } from '../config/models.js';
+import {
+  BEDROCK_API_KEY_ENV,
+  loadBedrockBearerToken,
+} from '../core/bedrockContentGenerator/secrets.js';
 import { defaultModalities } from '../core/modalityDefaults.js';
 import {
   resolveField,
@@ -153,6 +157,10 @@ export function resolveModelConfig(
   // Special handling for Qwen OAuth
   if (authType === AuthType.QWEN_OAUTH) {
     return resolveQwenOAuthConfig(input, warnings);
+  }
+
+  if (authType === AuthType.USE_BEDROCK) {
+    return resolveBedrockConfig(input);
   }
 
   // Get auth-specific env var mappings.
@@ -296,6 +304,50 @@ export function resolveModelConfig(
   sources['authType'] = computedSource('provided by caller');
 
   return { config, sources, warnings };
+}
+
+function resolveBedrockConfig(
+  input: ModelConfigSourcesInput,
+): ModelConfigResolutionResult {
+  const sources: ConfigSources = {
+    authType: computedSource('hardcoded Bedrock runtime'),
+    model: defaultSource(DEFAULT_BEDROCK_MODEL),
+    apiKey: {
+      kind: 'env',
+      envKey: BEDROCK_API_KEY_ENV,
+    },
+  };
+
+  if (input.proxy) {
+    sources['proxy'] = computedSource('Config.getProxy()');
+  }
+
+  const generationConfig = resolveGenerationConfig(
+    input.settings?.generationConfig,
+    input.modelProvider?.generationConfig,
+    AuthType.USE_BEDROCK,
+    DEFAULT_BEDROCK_MODEL,
+    sources,
+  );
+  applyTimeoutEnvOverride(
+    input.env,
+    generationConfig,
+    sources,
+    input.modelProvider,
+  );
+
+  return {
+    config: {
+      authType: AuthType.USE_BEDROCK,
+      model: DEFAULT_BEDROCK_MODEL,
+      apiKey: input.env[BEDROCK_API_KEY_ENV] || loadBedrockBearerToken(),
+      apiKeyEnvKey: BEDROCK_API_KEY_ENV,
+      proxy: input.proxy,
+      ...generationConfig,
+    },
+    sources,
+    warnings: [],
+  };
 }
 
 /**

@@ -33,15 +33,13 @@ import {
   SchemaValidator,
   type ConfigParameters,
   type MCPServerConfig,
+  loadBedrockSecrets,
 } from '@qwen-code/qwen-code-core';
 import { extensionsCommand } from '../commands/extensions.js';
 import { hooksCommand } from '../commands/hooks.js';
 import type { Settings } from './settings.js';
 import { loadSettings, SettingScope } from './settings.js';
-import {
-  resolveCliGenerationConfig,
-  getAuthTypeFromEnv,
-} from '../utils/modelConfigUtils.js';
+import { resolveCliGenerationConfig } from '../utils/modelConfigUtils.js';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import * as fs from 'node:fs';
@@ -865,6 +863,7 @@ export async function parseArguments(): Promise<CliArgs> {
           choices: [
             AuthType.USE_OPENAI,
             AuthType.USE_ANTHROPIC,
+            AuthType.USE_BEDROCK,
             AuthType.QWEN_OAUTH,
             AuthType.USE_GEMINI,
             AuthType.USE_VERTEX_AI,
@@ -1518,11 +1517,14 @@ export async function loadCliConfig(
       : undefined;
   }
 
-  const selectedAuthType =
-    (argv.authType as AuthType | undefined) ||
-    (bareMode ? undefined : settings.security?.auth?.selectedType) ||
-    /* getAuthTypeFromEnv means no authType was explicitly provided, we infer the authType from env vars */
-    getAuthTypeFromEnv();
+  const bedrockSecrets = loadBedrockSecrets();
+  for (const [key, value] of Object.entries(bedrockSecrets)) {
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+
+  const selectedAuthType = AuthType.USE_BEDROCK;
 
   // Unified resolution of generation config with source attribution
   const resolvedCliConfig = resolveCliGenerationConfig({
