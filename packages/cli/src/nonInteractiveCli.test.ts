@@ -186,6 +186,7 @@ describe('runNonInteractive', () => {
       getContentGeneratorConfig: vi.fn().mockReturnValue({}),
       getDebugMode: vi.fn().mockReturnValue(false),
       getOutputFormat: vi.fn().mockReturnValue('text'),
+      getTokenBudget: vi.fn().mockReturnValue(-1),
       getJsonSchema: vi.fn().mockReturnValue(undefined),
       getFolderTrustFeature: vi.fn().mockReturnValue(false),
       getFolderTrust: vi.fn().mockReturnValue(false),
@@ -1855,6 +1856,116 @@ describe('runNonInteractive', () => {
     });
 
     nowSpy.mockRestore();
+  });
+
+  it('should emit a defeat message and error result when token budget is exceeded in JSON mode', async () => {
+    (mockConfig.getOutputFormat as Mock).mockReturnValue(OutputFormat.JSON);
+    (mockConfig.getTokenBudget as Mock).mockReturnValue(10);
+    setupMetricsMock();
+
+    mockGeminiClient.sendMessageStream.mockReturnValue(
+      createStreamFromEvents([
+        { type: GeminiEventType.Content, value: 'Initial answer' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: { totalTokenCount: 11 } },
+        },
+      ]),
+    );
+
+    const exitCode = await runNonInteractive(
+      mockConfig,
+      mockSettings,
+      'budget test',
+      'prompt-budget-json',
+    );
+
+    expect(exitCode).toBe(1);
+
+    const outputCalls = processStdoutSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string',
+    );
+    const parsed = JSON.parse(outputCalls[outputCalls.length - 1][0]);
+    expect(Array.isArray(parsed)).toBe(true);
+
+    const assistantMessages = parsed.filter(
+      (msg: { type?: string }) => msg.type === 'assistant',
+    );
+    expect(assistantMessages).toHaveLength(2);
+    expect(
+      JSON.stringify(assistantMessages[1]?.message?.content ?? []),
+    ).toContain(
+      "I can't complete this request within the configured token budget.",
+    );
+
+    const resultMessage = parsed.find(
+      (msg: { type?: string }) => msg.type === 'result',
+    );
+    expect(resultMessage?.subtype).toBe('error_during_execution');
+    expect(resultMessage?.is_error).toBe(true);
+    expect(String(resultMessage?.error?.message ?? '')).toContain(
+      'exceeds the budget of 10',
+    );
+  });
+
+  it('should emit a defeat message and error result when token budget is exceeded in stream-json mode', async () => {
+    (mockConfig.getOutputFormat as Mock).mockReturnValue('stream-json');
+    (mockConfig.getIncludePartialMessages as Mock).mockReturnValue(false);
+    (mockConfig.getTokenBudget as Mock).mockReturnValue(10);
+    setupMetricsMock();
+
+    const writes: string[] = [];
+    processStdoutSpy.mockImplementation((chunk: string | Uint8Array) => {
+      if (typeof chunk === 'string') {
+        writes.push(chunk);
+      } else {
+        writes.push(Buffer.from(chunk).toString('utf8'));
+      }
+      return true;
+    });
+
+    mockGeminiClient.sendMessageStream.mockReturnValue(
+      createStreamFromEvents([
+        { type: GeminiEventType.Content, value: 'Initial answer' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: { totalTokenCount: 11 } },
+        },
+      ]),
+    );
+
+    const exitCode = await runNonInteractive(
+      mockConfig,
+      mockSettings,
+      'budget test',
+      'prompt-budget-stream',
+    );
+
+    expect(exitCode).toBe(1);
+
+    const envelopes = writes
+      .join('')
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line));
+
+    const assistantEnvelopes = envelopes.filter(
+      (env) => env.type === 'assistant',
+    );
+    expect(assistantEnvelopes).toHaveLength(2);
+    expect(
+      JSON.stringify(assistantEnvelopes[1]?.message?.content ?? []),
+    ).toContain(
+      "I can't complete this request within the configured token budget.",
+    );
+
+    const resultEnvelope = envelopes.at(-1);
+    expect(resultEnvelope?.type).toBe('result');
+    expect(resultEnvelope?.subtype).toBe('error_during_execution');
+    expect(resultEnvelope?.is_error).toBe(true);
+    expect(String(resultEnvelope?.error?.message ?? '')).toContain(
+      'exceeds the budget of 10',
+    );
   });
 
   it('should not emit user message when userMessage option is provided (stream-json input binding)', async () => {

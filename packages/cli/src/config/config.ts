@@ -169,6 +169,7 @@ export interface CliArgs {
   /** Internal: preserve the outer session ID when relaunching in a sandbox */
   sandboxSessionId?: string | undefined;
   maxSessionTurns: number | undefined;
+  tokenBudget?: number | undefined;
   coreTools: string[] | undefined;
   excludeTools: string[] | undefined;
   disabledSlashCommands: string[] | undefined;
@@ -614,6 +615,11 @@ export async function parseArguments(): Promise<CliArgs> {
           description:
             'Execute the provided prompt and continue in interactive mode',
         })
+        .option('token-budget', {
+          type: 'number',
+          description:
+            'Headless-only single-turn token budget. If a model turn exceeds this total-token count, emit a defeat message and exit with an error.',
+        })
         .option('system-prompt', {
           type: 'string',
           description:
@@ -901,6 +907,24 @@ export async function parseArguments(): Promise<CliArgs> {
           }
           if (argv['prompt'] && argv['promptInteractive']) {
             return 'Cannot use both --prompt (-p) and --prompt-interactive (-i) together';
+          }
+          if (argv['tokenBudget'] !== undefined) {
+            const tokenBudget = argv['tokenBudget'];
+            if (
+              typeof tokenBudget !== 'number' ||
+              !Number.isFinite(tokenBudget) ||
+              tokenBudget <= 0
+            ) {
+              return '--token-budget must be a positive number.';
+            }
+            if (argv['promptInteractive']) {
+              return '--token-budget cannot be used with --prompt-interactive (-i); it only applies to headless non-interactive runs.';
+            }
+            const stdinIsPiped = !process.stdin.isTTY;
+            const hasPrompt = !!argv['prompt'];
+            if (!hasPrompt && !hasPositionalQuery && !stdinIsPiped) {
+              return '--token-budget only applies to non-interactive mode; pass a prompt via -p, as a positional argument, or piped via stdin.';
+            }
           }
           if (argv['yolo'] && argv['approvalMode']) {
             return 'Cannot use both --yolo (-y) and --approval-mode together. Use --approval-mode=yolo instead.';
@@ -1730,6 +1754,7 @@ export async function loadCliConfig(
     bugCommand: settings.advanced?.bugCommand,
     model: resolvedModel,
     outputLanguageFilePath,
+    tokenBudget: argv.tokenBudget,
     sessionTokenLimit: settings.model?.sessionTokenLimit ?? -1,
     maxSessionTurns:
       argv.maxSessionTurns ?? settings.model?.maxSessionTurns ?? -1,

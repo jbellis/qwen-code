@@ -28,7 +28,12 @@ import {
   SendMessageType,
   restoreWorktreeContext,
 } from '@qwen-code/qwen-code-core';
-import type { Content, Part, PartListUnion } from '@google/genai';
+import type {
+  Content,
+  GenerateContentResponseUsageMetadata,
+  Part,
+  PartListUnion,
+} from '@google/genai';
 import type { CLIUserMessage, PermissionMode } from './nonInteractive/types.js';
 import type { JsonOutputAdapterInterface } from './nonInteractive/io/BaseJsonOutputAdapter.js';
 import { JsonOutputAdapter } from './nonInteractive/io/JsonOutputAdapter.js';
@@ -119,6 +124,17 @@ function emitLoopDetectedMessage(
   const detail = reason ? ` (${loopType}: ${reason})` : '';
   process.stderr.write(
     `Loop detection halted the run${detail}. Set the \`model.skipLoopDetection\` setting to true to disable.\n`,
+  );
+}
+
+function buildTokenBudgetDefeatMessage(
+  totalTokenCount: number,
+  tokenBudget: number,
+): string {
+  return (
+    `I can't complete this request within the configured token budget. ` +
+    `This turn used ${totalTokenCount.toLocaleString()} total tokens, ` +
+    `which exceeds the budget of ${tokenBudget.toLocaleString()}, so I am stopping here.`
   );
 }
 
@@ -216,9 +232,53 @@ export async function runNonInteractive(
     let turnCount = 0;
     let totalApiDurationMs = 0;
     const startTime = Date.now();
+    const tokenBudget = config.getTokenBudget();
+    let tokenBudgetExceeded = false;
 
     const geminiClient = config.getGeminiClient();
     const abortController = options.abortController ?? new AbortController();
+
+    const emitTokenBudgetExceededResult = (
+      usageMetadata: GenerateContentResponseUsageMetadata,
+    ): number => {
+      const totalTokenCount = usageMetadata.totalTokenCount;
+      if (
+        tokenBudget <= 0 ||
+        typeof totalTokenCount !== 'number' ||
+        totalTokenCount <= tokenBudget
+      ) {
+        return -1;
+      }
+
+      const defeatMessage = buildTokenBudgetDefeatMessage(
+        totalTokenCount,
+        tokenBudget,
+      );
+      adapter.startAssistantMessage();
+      adapter.processEvent({
+        type: GeminiEventType.Content,
+        value: defeatMessage,
+      });
+      adapter.finalizeAssistantMessage();
+
+      const metrics = uiTelemetryService.getMetrics();
+      const usage = computeUsageFromMetrics(metrics);
+      const stats =
+        outputFormat === OutputFormat.JSON
+          ? uiTelemetryService.getMetrics()
+          : undefined;
+      adapter.emitResult({
+        isError: true,
+        durationMs: Date.now() - startTime,
+        apiDurationMs: totalApiDurationMs,
+        numTurns: turnCount,
+        errorMessage: defeatMessage,
+        usage,
+        stats,
+      });
+      tokenBudgetExceeded = true;
+      return 1;
+    };
 
     interface LocalQueueItem {
       displayText: string;
@@ -746,6 +806,7 @@ export async function runNonInteractive(
 
         // Start assistant message for this turn
         adapter.startAssistantMessage();
+        let turnUsageMetadata: GenerateContentResponseUsageMetadata | undefined;
 
         for await (const event of responseStream) {
           if (abortController.signal.aborted) {
@@ -767,6 +828,9 @@ export async function runNonInteractive(
           if (event.type === GeminiEventType.LoopDetected) {
             emitLoopDetectedMessage(config, event.value?.loopType);
           }
+          if (event.type === GeminiEventType.Finished) {
+            turnUsageMetadata = event.value?.usageMetadata;
+          }
           if (
             outputFormat === OutputFormat.TEXT &&
             event.type === GeminiEventType.Error
@@ -787,6 +851,11 @@ export async function runNonInteractive(
         // Finalize assistant message
         adapter.finalizeAssistantMessage();
         totalApiDurationMs += Date.now() - apiStartTime;
+        const tokenBudgetExitCode =
+          turnUsageMetadata && emitTokenBudgetExceededResult(turnUsageMetadata);
+        if (tokenBudgetExitCode && tokenBudgetExitCode > 0) {
+          return tokenBudgetExitCode;
+        }
 
         if (toolCallRequests.length > 0) {
           // Dispatch the per-turn tool-call batch through the shared
@@ -860,6 +929,9 @@ export async function runNonInteractive(
               itemIsFirstTurn = false;
 
               adapter.startAssistantMessage();
+              let itemTurnUsageMetadata:
+                | GenerateContentResponseUsageMetadata
+                | undefined;
 
               for await (const event of itemStream) {
                 if (abortController.signal.aborted) {
@@ -874,6 +946,9 @@ export async function runNonInteractive(
                 }
                 if (event.type === GeminiEventType.LoopDetected) {
                   emitLoopDetectedMessage(config, event.value?.loopType);
+                }
+                if (event.type === GeminiEventType.Finished) {
+                  itemTurnUsageMetadata = event.value?.usageMetadata;
                 }
                 if (
                   outputFormat === OutputFormat.TEXT &&
@@ -893,6 +968,12 @@ export async function runNonInteractive(
 
               adapter.finalizeAssistantMessage();
               totalApiDurationMs += Date.now() - itemApiStartTime;
+              const tokenBudgetExitCode =
+                itemTurnUsageMetadata &&
+                emitTokenBudgetExceededResult(itemTurnUsageMetadata);
+              if (tokenBudgetExitCode && tokenBudgetExitCode > 0) {
+                return;
+              }
 
               if (itemToolCallRequests.length > 0) {
                 // Same shared dispatch as the main-turn loop. The only
@@ -935,7 +1016,8 @@ export async function runNonInteractive(
                 // Stop draining once a queued item's structured_output
                 // call captured the terminal contract — no point running
                 // more queued prompts that can't influence the result.
-                if (structuredSubmission !== undefined) return;
+                if (structuredSubmission !== undefined || tokenBudgetExceeded)
+                  return;
                 await drainOneItem();
               }
             })();
@@ -1033,7 +1115,8 @@ export async function runNonInteractive(
             // A drain-turn structured_output captured the terminal
             // contract — bail out of the holdback loop early and let the
             // post-loop code emit the success result.
-            if (structuredSubmission !== undefined) break;
+            if (structuredSubmission !== undefined || tokenBudgetExceeded)
+              break;
             // Wait for every background task's terminal notification, not
             // just the running ones: cancel() marks status 'cancelled'
             // synchronously but the notification is emitted later by the
@@ -1053,6 +1136,10 @@ export async function runNonInteractive(
             await Promise.allSettled(memoryTaskPromises);
           }
           finalizeOneShotMonitors();
+
+          if (tokenBudgetExceeded) {
+            return 1;
+          }
 
           const metrics = uiTelemetryService.getMetrics();
           const usage = computeUsageFromMetrics(metrics);

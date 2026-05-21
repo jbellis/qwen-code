@@ -727,6 +727,108 @@ describe('parseArguments', () => {
     }
   });
 
+  it('should accept --token-budget in headless mode with --prompt', async () => {
+    process.argv = [
+      'node',
+      'script.js',
+      '--prompt',
+      'test',
+      '--token-budget',
+      '1234',
+    ];
+
+    const argv = await parseArguments();
+    expect(argv.prompt).toBe('test');
+    expect(argv.tokenBudget).toBe(1234);
+  });
+
+  it('should accept --token-budget in headless mode with piped stdin', async () => {
+    process.argv = ['node', 'script.js', '--token-budget', '1234'];
+
+    const originalIsTTY = process.stdin.isTTY;
+    process.stdin.isTTY = false;
+    try {
+      const argv = await parseArguments();
+      expect(argv.tokenBudget).toBe(1234);
+      expect(argv.prompt).toBeUndefined();
+    } finally {
+      process.stdin.isTTY = originalIsTTY;
+    }
+  });
+
+  it('should reject --token-budget in interactive mode with no prompt source', async () => {
+    process.argv = ['node', 'script.js', '--token-budget', '1234'];
+
+    const originalIsTTY = process.stdin.isTTY;
+    process.stdin.isTTY = true;
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    mockWriteStderrLine.mockClear();
+
+    try {
+      await expect(parseArguments()).rejects.toThrow('process.exit called');
+      expect(mockWriteStderrLine).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '--token-budget only applies to non-interactive mode',
+        ),
+      );
+    } finally {
+      mockExit.mockRestore();
+      process.stdin.isTTY = originalIsTTY;
+    }
+  });
+
+  it('should reject --token-budget with --prompt-interactive', async () => {
+    process.argv = [
+      'node',
+      'script.js',
+      '--prompt-interactive',
+      'test',
+      '--token-budget',
+      '1234',
+    ];
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    mockWriteStderrLine.mockClear();
+
+    await expect(parseArguments()).rejects.toThrow('process.exit called');
+
+    expect(mockWriteStderrLine).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '--token-budget cannot be used with --prompt-interactive',
+      ),
+    );
+
+    mockExit.mockRestore();
+  });
+
+  it('should reject non-positive --token-budget', async () => {
+    process.argv = [
+      'node',
+      'script.js',
+      '--prompt',
+      'test',
+      '--token-budget',
+      '0',
+    ];
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    mockWriteStderrLine.mockClear();
+
+    await expect(parseArguments()).rejects.toThrow('process.exit called');
+
+    expect(mockWriteStderrLine).toHaveBeenCalledWith(
+      expect.stringContaining('--token-budget must be a positive number.'),
+    );
+
+    mockExit.mockRestore();
+  });
+
   it('should throw when --json-schema is combined with --input-format stream-json', async () => {
     // stream-json input runs through runNonInteractiveStreamJson which
     // doesn't honor the structured-output single-shot termination
@@ -2711,6 +2813,22 @@ describe('loadCliConfig interactive', () => {
     const argv = await parseArguments();
     const config = await loadCliConfig({}, argv, undefined, []);
     expect(config.isInteractive()).toBe(false);
+  });
+
+  it('should preserve token budget in headless config', async () => {
+    process.stdin.isTTY = true;
+    process.argv = [
+      'node',
+      'script.js',
+      '--prompt',
+      'test',
+      '--token-budget',
+      '2048',
+    ];
+    const argv = await parseArguments();
+    const config = await loadCliConfig({}, argv, undefined, []);
+    expect(config.isInteractive()).toBe(false);
+    expect(config.getTokenBudget()).toBe(2048);
   });
 
   it('should not be interactive if positional prompt words are provided with other flags', async () => {

@@ -560,6 +560,7 @@ export interface ConfigParameters {
   maxSessionTurns?: number;
   clearContextOnIdle?: ClearContextOnIdleSettings;
   sessionTokenLimit?: number;
+  tokenBudget?: number;
   experimentalZedIntegration?: boolean;
   cronEnabled?: boolean;
   emitToolUseSummaries?: boolean;
@@ -850,6 +851,7 @@ export class Config {
   private readonly maxSessionTurns: number;
   private readonly clearContextOnIdle: ClearContextOnIdleSettings;
   private readonly sessionTokenLimit: number;
+  private readonly tokenBudget: number;
   private readonly listExtensions: boolean;
   private readonly overrideExtensions?: string[];
 
@@ -1015,6 +1017,7 @@ export class Config {
         params.clearContextOnIdle?.toolResultsNumToKeep ?? 5,
     };
     this.sessionTokenLimit = params.sessionTokenLimit ?? -1;
+    this.tokenBudget = params.tokenBudget ?? -1;
     this.experimentalZedIntegration =
       params.experimentalZedIntegration ?? false;
     this.cronEnabled = params.cronEnabled ?? false;
@@ -2131,6 +2134,10 @@ export class Config {
 
   getSessionTokenLimit(): number {
     return this.sessionTokenLimit;
+  }
+
+  getTokenBudget(): number {
+    return this.tokenBudget;
   }
 
   getEmbeddingModel(): string {
