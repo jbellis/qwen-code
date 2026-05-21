@@ -9,10 +9,6 @@ import {
   DEFAULT_QWEN_MODEL,
   MAINLINE_CODER_MODEL,
 } from '../config/models.js';
-import {
-  QWEN_API_KEY_ENV,
-  QWEN_OPENAI_API_KEY_ENV,
-} from '../core/qwenCoderSecrets.js';
 
 import type { ModelConfig } from './types.js';
 
@@ -72,9 +68,9 @@ export interface AuthEnvMapping {
 
 export const AUTH_ENV_MAPPINGS = {
   openai: {
-    apiKey: [QWEN_API_KEY_ENV, QWEN_OPENAI_API_KEY_ENV],
-    baseUrl: [],
-    model: [],
+    apiKey: ['OPENAI_API_KEY'],
+    baseUrl: ['OPENAI_BASE_URL'],
+    model: ['OPENAI_MODEL', 'QWEN_MODEL'],
   },
   anthropic: {
     apiKey: ['ANTHROPIC_API_KEY'],

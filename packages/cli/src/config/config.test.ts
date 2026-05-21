@@ -9,6 +9,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   ToolNames,
+  DEFAULT_BEDROCK_MODEL,
   DEFAULT_QWEN_MODEL,
   OutputFormat,
   NativeLspService,
@@ -2178,7 +2179,7 @@ describe('loadCliConfig model selection', () => {
     expect(config.getModel()).toBe(DEFAULT_QWEN_MODEL);
   });
 
-  it('uses hardcoded Qwen3 Coder instead of model from argvs/settings', async () => {
+  it('uses hardcoded Bedrock Sonnet instead of model from argvs', async () => {
     process.argv = [
       'node',
       'script.js',
@@ -2199,10 +2200,10 @@ describe('loadCliConfig model selection', () => {
       [],
     );
 
-    expect(config.getModel()).toBe(DEFAULT_QWEN_MODEL);
+    expect(config.getModel()).toBe(DEFAULT_BEDROCK_MODEL);
   });
 
-  it('uses hardcoded Qwen3 Coder when model arg is provided', async () => {
+  it('uses hardcoded Bedrock Sonnet when model arg is provided', async () => {
     process.argv = [
       'node',
       'script.js',
@@ -2221,7 +2222,7 @@ describe('loadCliConfig model selection', () => {
       [],
     );
 
-    expect(config.getModel()).toBe(DEFAULT_QWEN_MODEL);
+    expect(config.getModel()).toBe(DEFAULT_BEDROCK_MODEL);
   });
 });
 

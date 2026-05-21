@@ -25,11 +25,6 @@ import {
   BEDROCK_API_KEY_ENV,
   loadBedrockBearerToken,
 } from '../core/bedrockContentGenerator/secrets.js';
-import {
-  QWEN_API_KEY_ENV,
-  QWEN_CODER_BASE_URL,
-  QWEN_OPENAI_API_KEY_ENV,
-} from '../core/qwenCoderSecrets.js';
 import { defaultModalities } from '../core/modalityDefaults.js';
 import {
   resolveField,
@@ -166,10 +161,6 @@ export function resolveModelConfig(
 
   if (authType === AuthType.USE_BEDROCK) {
     return resolveBedrockConfig(input);
-  }
-
-  if (authType === AuthType.USE_OPENAI) {
-    return resolveQwenCoderConfig(input);
   }
 
   // Get auth-specific env var mappings.
@@ -351,57 +342,6 @@ function resolveBedrockConfig(
       model: DEFAULT_BEDROCK_MODEL,
       apiKey: input.env[BEDROCK_API_KEY_ENV] || loadBedrockBearerToken(),
       apiKeyEnvKey: BEDROCK_API_KEY_ENV,
-      proxy: input.proxy,
-      ...generationConfig,
-    },
-    sources,
-    warnings: [],
-  };
-}
-
-function resolveQwenCoderConfig(
-  input: ModelConfigSourcesInput,
-): ModelConfigResolutionResult {
-  const apiKey =
-    input.env[QWEN_API_KEY_ENV] || input.env[QWEN_OPENAI_API_KEY_ENV];
-  const apiKeyEnvKey = input.env[QWEN_API_KEY_ENV]
-    ? QWEN_API_KEY_ENV
-    : QWEN_OPENAI_API_KEY_ENV;
-  const sources: ConfigSources = {
-    authType: computedSource('hardcoded Qwen3-Coder runtime'),
-    model: defaultSource(DEFAULT_QWEN_MODEL),
-    baseUrl: defaultSource(QWEN_CODER_BASE_URL),
-    apiKey: {
-      kind: 'env',
-      envKey: apiKeyEnvKey,
-    },
-  };
-
-  if (input.proxy) {
-    sources['proxy'] = computedSource('Config.getProxy()');
-  }
-
-  const generationConfig = resolveGenerationConfig(
-    input.settings?.generationConfig,
-    input.modelProvider?.generationConfig,
-    AuthType.USE_OPENAI,
-    DEFAULT_QWEN_MODEL,
-    sources,
-  );
-  applyTimeoutEnvOverride(
-    input.env,
-    generationConfig,
-    sources,
-    input.modelProvider,
-  );
-
-  return {
-    config: {
-      authType: AuthType.USE_OPENAI,
-      model: DEFAULT_QWEN_MODEL,
-      apiKey,
-      apiKeyEnvKey,
-      baseUrl: QWEN_CODER_BASE_URL,
       proxy: input.proxy,
       ...generationConfig,
     },

@@ -10,7 +10,6 @@ import {
   type ModelProvidersConfig,
   type ProviderModelConfig,
   BEDROCK_API_KEY_ENV,
-  QWEN_API_KEY_ENV,
   loadBedrockBearerToken,
 } from '@qwen-code/qwen-code-core';
 import { loadEnvironment, loadSettings, type Settings } from './settings.js';
@@ -20,7 +19,7 @@ import { t } from '../i18n/index.js';
  * Default environment variable names for each auth type
  */
 const DEFAULT_ENV_KEYS: Record<string, string> = {
-  [AuthType.USE_OPENAI]: QWEN_API_KEY_ENV,
+  [AuthType.USE_OPENAI]: 'OPENAI_API_KEY',
   [AuthType.USE_ANTHROPIC]: 'ANTHROPIC_API_KEY',
   [AuthType.USE_GEMINI]: 'GEMINI_API_KEY',
   [AuthType.USE_VERTEX_AI]: 'GOOGLE_API_KEY',
@@ -115,14 +114,6 @@ function hasApiKeyForAuth(
     }
   }
 
-  if (authType === AuthType.USE_OPENAI && process.env['OPENAI_API_KEY']) {
-    return {
-      hasKey: true,
-      checkedEnvKey: 'OPENAI_API_KEY',
-      isExplicitEnvKey: false,
-    };
-  }
-
   // Also check settings.security.auth.apiKey as fallback (only for default env key)
   if (settings.security?.auth?.apiKey) {
     return {
@@ -189,7 +180,7 @@ export function validateAuthMethod(
     if (!hasKey) {
       const envKeyHint = checkedEnvKey
         ? `'${checkedEnvKey}'`
-        : `'${QWEN_API_KEY_ENV}'`;
+        : "'OPENAI_API_KEY'";
       if (isExplicitEnvKey) {
         // Explicit envKey configured - only suggest setting the env var
         return t(

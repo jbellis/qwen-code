@@ -44,7 +44,7 @@ describe('validateAuthMethod', () => {
 
   it('should return an error message for USE_OPENAI if no API key is available', () => {
     expect(validateAuthMethod(AuthType.USE_OPENAI)).toBe(
-      "Missing API key for OpenAI-compatible auth. Set settings.security.auth.apiKey, or set the 'OPENROUTER_API_KEY' environment variable.",
+      "Missing API key for OpenAI-compatible auth. Set settings.security.auth.apiKey, or set the 'OPENAI_API_KEY' environment variable.",
     );
   });
 

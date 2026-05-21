@@ -58,7 +58,6 @@ export * from './output/types.js';
 export * from './core/client.js';
 export * from './core/contentGenerator.js';
 export * from './core/bedrockContentGenerator/index.js';
-export * from './core/qwenCoderSecrets.js';
 export * from './core/coreToolScheduler.js';
 export * from './core/permissionFlow.js';
 export * from './core/permission-helpers.js';
