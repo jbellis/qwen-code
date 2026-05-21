@@ -9,6 +9,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   ToolNames,
+  DEFAULT_BEDROCK_MODEL,
   DEFAULT_QWEN_MODEL,
   OutputFormat,
   NativeLspService,
@@ -1528,23 +1529,23 @@ describe('mergeExcludeTools', () => {
     expect(config.getPermissionsDeny()).toContain('tool_search');
   });
 
-  it('should auto-disable tool_search for deepseek-v4 models', async () => {
+  it('does not auto-disable tool_search for ignored deepseek-v4 model argv', async () => {
     process.argv = ['node', 'script.js', '--model', 'deepseek-v4-flash'];
     const argv = await parseArguments();
     const settings: Settings = {};
     const config = await loadCliConfig(settings, argv, undefined, []);
-    expect(config.getPermissionsDeny()).toContain('tool_search');
+    expect(config.getPermissionsDeny()).not.toContain('tool_search');
   });
 
-  it('should auto-disable tool_search for deepseek-v3 models', async () => {
+  it('does not auto-disable tool_search for ignored deepseek-v3 model argv', async () => {
     process.argv = ['node', 'script.js', '--model', 'deepseek-v3'];
     const argv = await parseArguments();
     const settings: Settings = {};
     const config = await loadCliConfig(settings, argv, undefined, []);
-    expect(config.getPermissionsDeny()).toContain('tool_search');
+    expect(config.getPermissionsDeny()).not.toContain('tool_search');
   });
 
-  it('should auto-disable tool_search for deepseek-chat models with provider prefix', async () => {
+  it('does not auto-disable tool_search for ignored deepseek-chat model argv', async () => {
     process.argv = [
       'node',
       'script.js',
@@ -1554,7 +1555,7 @@ describe('mergeExcludeTools', () => {
     const argv = await parseArguments();
     const settings: Settings = {};
     const config = await loadCliConfig(settings, argv, undefined, []);
-    expect(config.getPermissionsDeny()).toContain('tool_search');
+    expect(config.getPermissionsDeny()).not.toContain('tool_search');
   });
 
   it('should not auto-disable tool_search for non-deepseek models', async () => {
@@ -1896,7 +1897,8 @@ describe('loadCliConfig with allowed-mcp-server-names', () => {
     process.argv = ['node', 'script.js'];
     const argv = await parseArguments();
     const config = await loadCliConfig(baseSettings, argv, undefined, []);
-    expect(config.getMcpServers()).toEqual(baseSettings.mcpServers);
+    expect(config.getMcpServers()).toMatchObject(baseSettings.mcpServers);
+    expect(config.getMcpServers()).toHaveProperty('bifrost');
   });
 
   it('should allow only the specified MCP server', async () => {
@@ -1976,11 +1978,12 @@ describe('loadCliConfig with allowed-mcp-server-names', () => {
     };
     const config = await loadCliConfig(settings, argv, undefined, []);
     // getMcpServers() now returns all servers, use isMcpServerDisabled() to check status
-    expect(config.getMcpServers()).toEqual({
+    expect(config.getMcpServers()).toMatchObject({
       server1: { url: 'http://localhost:8080' },
       server2: { url: 'http://localhost:8081' },
       server3: { url: 'http://localhost:8082' },
     });
+    expect(config.getMcpServers()).toHaveProperty('bifrost');
     expect(config.isMcpServerDisabled('server1')).toBe(true);
     expect(config.isMcpServerDisabled('server2')).toBe(true);
     expect(config.isMcpServerDisabled('server3')).toBe(false);
@@ -1999,10 +2002,11 @@ describe('loadCliConfig with allowed-mcp-server-names', () => {
     const config = await loadCliConfig(settings, argv, undefined, []);
     // allowedMcpServers filters which servers are available
     // but excluded servers are still returned by getMcpServers()
-    expect(config.getMcpServers()).toEqual({
+    expect(config.getMcpServers()).toMatchObject({
       server1: { url: 'http://localhost:8080' },
       server2: { url: 'http://localhost:8081' },
     });
+    expect(config.getMcpServers()).not.toHaveProperty('bifrost');
     expect(config.isMcpServerDisabled('server1')).toBe(true);
     expect(config.isMcpServerDisabled('server2')).toBe(false);
   });
@@ -2135,10 +2139,10 @@ describe('loadCliConfig with --mcp-config', () => {
     const argv = await parseArguments();
     const config = await loadCliConfig(baseSettings, argv);
 
-    // Should only have settings server
-    expect(config.getMcpServers()).toEqual({
+    expect(config.getMcpServers()).toMatchObject({
       'settings-server': { url: 'http://localhost:9000' },
     });
+    expect(config.getMcpServers()).toHaveProperty('bifrost');
   });
 });
 
@@ -2175,7 +2179,7 @@ describe('loadCliConfig model selection', () => {
     expect(config.getModel()).toBe(DEFAULT_QWEN_MODEL);
   });
 
-  it('always prefers model from argvs', async () => {
+  it('uses hardcoded Bedrock Sonnet instead of model from argvs', async () => {
     process.argv = [
       'node',
       'script.js',
@@ -2196,10 +2200,10 @@ describe('loadCliConfig model selection', () => {
       [],
     );
 
-    expect(config.getModel()).toBe('qwen3-coder-plus');
+    expect(config.getModel()).toBe(DEFAULT_BEDROCK_MODEL);
   });
 
-  it('selects the model from argvs if provided', async () => {
+  it('uses hardcoded Bedrock Sonnet when model arg is provided', async () => {
     process.argv = [
       'node',
       'script.js',
@@ -2218,7 +2222,7 @@ describe('loadCliConfig model selection', () => {
       [],
     );
 
-    expect(config.getModel()).toBe('qwen3-coder-plus');
+    expect(config.getModel()).toBe(DEFAULT_BEDROCK_MODEL);
   });
 });
 
@@ -2386,7 +2390,6 @@ describe('loadCliConfig with includeDirectories', () => {
     const config = await loadCliConfig(settings, argv, undefined, []);
 
     expect(config.getCoreTools()).toEqual([
-      ToolNames.READ_FILE,
       ToolNames.EDIT,
       ToolNames.NOTEBOOK_EDIT,
       ToolNames.SHELL,
@@ -2405,7 +2408,6 @@ describe('loadCliConfig with includeDirectories', () => {
     const config = await loadCliConfig({}, argv, undefined, []);
 
     expect(config.getCoreTools()).toEqual([
-      ToolNames.READ_FILE,
       ToolNames.EDIT,
       ToolNames.NOTEBOOK_EDIT,
       ToolNames.SHELL,

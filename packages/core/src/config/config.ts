@@ -56,7 +56,6 @@ import {
   type SendSdkMcpMessage,
 } from '../tools/mcp-client.js';
 import { setGeminiMdFilename } from '../memory/const.js';
-import { canUseRipgrep } from '../utils/ripgrepUtils.js';
 import { recordStartupEvent } from '../utils/startupEventSink.js';
 import { ToolRegistry, type ToolFactory } from '../tools/tool-registry.js';
 import type { McpBudgetEvent } from '../tools/mcp-client-manager.js';
@@ -90,8 +89,6 @@ import {
   shutdownTelemetry,
   refreshSessionContext,
   logStartSession,
-  logRipgrepFallback,
-  RipgrepFallbackEvent,
   StartSessionEvent,
   type TelemetryTarget,
 } from '../telemetry/index.js';
@@ -121,7 +118,6 @@ import { FileExclusions } from '../utils/ignorePatterns.js';
 import { shouldDefaultToNodePty } from '../utils/shell-utils.js';
 import { WorkspaceContext } from '../utils/workspaceContext.js';
 import { type ToolName } from '../utils/tool-utils.js';
-import { getErrorMessage } from '../utils/errors.js';
 import { normalizeProxyUrl } from '../utils/proxyUtils.js';
 
 // Local config modules
@@ -734,7 +730,6 @@ export interface ConfigInitializeOptions {
 }
 
 const DEFAULT_BARE_CORE_TOOLS = [
-  ToolNames.READ_FILE,
   ToolNames.EDIT,
   ToolNames.NOTEBOOK_EDIT,
   ToolNames.SHELL,
@@ -2330,8 +2325,26 @@ export class Config {
     return this.mcpServerCommand;
   }
 
+  private getDefaultBifrostMcpServer(): MCPServerConfig | undefined {
+    if (this.getBareMode()) return undefined;
+
+    const bifrostDir = path.resolve(this.targetDir, '..', 'bifrost');
+    return {
+      command: path.join(bifrostDir, 'target', 'debug', 'bifrost'),
+      args: ['--root', this.getWorkingDir(), '--server', 'searchtools'],
+      cwd: bifrostDir,
+      description: 'Bifrost analyzer search tools',
+    };
+  }
+
   getMcpServers(): Record<string, MCPServerConfig> | undefined {
     let mcpServers = { ...(this.mcpServers || {}) };
+    if (!mcpServers['bifrost']) {
+      const defaultBifrost = this.getDefaultBifrostMcpServer();
+      if (defaultBifrost) {
+        mcpServers['bifrost'] = defaultBifrost;
+      }
+    }
     const extensions = this.getActiveExtensions();
     for (const extension of extensions) {
       Object.entries(extension.config.mcpServers || {}).forEach(
@@ -3586,10 +3599,6 @@ export class Config {
     };
 
     if (this.getBareMode()) {
-      await registerLazy(ToolNames.READ_FILE, async () => {
-        const { ReadFileTool } = await import('../tools/read-file.js');
-        return new ReadFileTool(this);
-      });
       await registerLazy(ToolNames.EDIT, async () => {
         const { EditTool } = await import('../tools/edit.js');
         return new EditTool(this);
@@ -3633,50 +3642,6 @@ export class Config {
     await registerLazy(ToolNames.LS, async () => {
       const { LSTool } = await import('../tools/ls.js');
       return new LSTool(this);
-    });
-    await registerLazy(ToolNames.READ_FILE, async () => {
-      const { ReadFileTool } = await import('../tools/read-file.js');
-      return new ReadFileTool(this);
-    });
-
-    // --- Grep / RipGrep (conditional) ---
-    if (this.getUseRipgrep()) {
-      let useRipgrep = false;
-      let errorString: undefined | string = undefined;
-      try {
-        useRipgrep = await canUseRipgrep(this.getUseBuiltinRipgrep());
-      } catch (error: unknown) {
-        errorString = getErrorMessage(error);
-      }
-      if (useRipgrep) {
-        await registerLazy(ToolNames.GREP, async () => {
-          const { RipGrepTool } = await import('../tools/ripGrep.js');
-          return new RipGrepTool(this);
-        });
-      } else {
-        logRipgrepFallback(
-          this,
-          new RipgrepFallbackEvent(
-            this.getUseRipgrep(),
-            this.getUseBuiltinRipgrep(),
-            errorString || 'ripgrep is not available',
-          ),
-        );
-        await registerLazy(ToolNames.GREP, async () => {
-          const { GrepTool } = await import('../tools/grep.js');
-          return new GrepTool(this);
-        });
-      }
-    } else {
-      await registerLazy(ToolNames.GREP, async () => {
-        const { GrepTool } = await import('../tools/grep.js');
-        return new GrepTool(this);
-      });
-    }
-
-    await registerLazy(ToolNames.GLOB, async () => {
-      const { GlobTool } = await import('../tools/glob.js');
-      return new GlobTool(this);
     });
     await registerLazy(ToolNames.EDIT, async () => {
       const { EditTool } = await import('../tools/edit.js');

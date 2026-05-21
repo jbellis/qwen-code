@@ -530,9 +530,9 @@ ${subagentDescriptions}
 When using the Agent tool, specify a subagent_type parameter to select which agent type to use.
 
 When NOT to use the Agent tool:
-- If you want to read a specific file path, use the ${ToolNames.READ_FILE} tool or the ${ToolNames.GLOB} tool instead of the ${ToolNames.AGENT} tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the ${ToolNames.GREP} tool instead, to find the match more quickly
-- If you are searching for code within a specific file or set of 2-3 files, use the ${ToolNames.READ_FILE} tool instead of the ${ToolNames.AGENT} tool, to find the match more quickly
+- If you want to read a specific file path, use available MCP search/read tools or ${ToolNames.SHELL} instead of the ${ToolNames.AGENT} tool, to find the match more quickly
+- If you are searching for a specific class definition like "class Foo", use available MCP search tools or ${ToolNames.SHELL} instead, to find the match more quickly
+- If you are searching for code within a specific file or set of 2-3 files, use available MCP search/read tools or ${ToolNames.SHELL} instead of the ${ToolNames.AGENT} tool, to find the match more quickly
 - Other tasks that are not related to the agent descriptions above
 
 
@@ -2049,8 +2049,7 @@ class AgentToolInvocation extends BaseToolInvocation<AgentParams, ToolResult> {
             `The agent is working in the background. You will be notified automatically when it completes.\n` +
             `Do not duplicate this agent's work — avoid working with the same files or topics it is using. Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.\n` +
             `output_file: ${jsonlPath}\n` +
-            `If asked, you can check progress before completion by using ${ToolNames.READ_FILE}\n` +
-            `  or ${ToolNames.SHELL} tail on the output file.`,
+            `If asked, you can check progress before completion by using ${ToolNames.SHELL} tail on the output file.`,
           returnDisplay: this.currentDisplay!,
         };
       }

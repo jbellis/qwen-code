@@ -4090,17 +4090,15 @@ function getShellToolDescription(): string {
 
   return `Executes a given shell command (as \`${executionWrapper}\`) in a subprocess with optional timeout, ensuring proper handling and security measures.
 
-IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
+IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. Prefer MCP search/read tools for file inspection when available, and use shell file commands only when MCP coverage is unavailable or insufficient.
 
 **Usage notes**:
 - The command argument is required.
 - You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). If not specified, commands will timeout after 120000ms (2 minutes).
 - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
 
-- Avoid using run_shell_command with the \`find\`, \`grep\`, \`cat\`, \`head\`, \`tail\`, \`sed\`, \`awk\`, or \`echo\` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
-  - File search: Use ${ToolNames.GLOB} (NOT find or ls)
-  - Content search: Use ${ToolNames.GREP} (NOT grep or rg)
-  - Read files: Use ${ToolNames.READ_FILE} (NOT cat/head/tail)
+- Avoid using run_shell_command with \`echo\` for communication. Prefer direct assistant text instead.
+  - File inspection/search: Prefer MCP tools when available; otherwise use standard shell commands carefully.
   - Edit files: Use ${ToolNames.EDIT} (NOT sed/awk)
   - Write files: Use ${ToolNames.WRITE_FILE} (NOT echo >/cat <<EOF)
   - Communication: Output text directly (NOT echo/printf)
