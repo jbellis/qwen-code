@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DEFAULT_MODEL_ID = 'anthropic.claude-sonnet-4-6';
+const DEFAULT_MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const DEFAULT_REGION = 'us-east-1';
 const BEDROCK_TOKEN_ENV = 'AWS_BEARER_TOKEN_BEDROCK';
 const SECRETS_PATH = path.join(os.homedir(), '.secrets');

@@ -374,7 +374,7 @@ export async function createContentGenerator(
     const { createBedrockContentGenerator } = await import(
       './bedrockContentGenerator/index.js'
     );
-    generatorConfig.model = 'anthropic.claude-sonnet-4-6';
+    generatorConfig.model = 'us.anthropic.claude-sonnet-4-6';
     baseGenerator = createBedrockContentGenerator(generatorConfig, config);
   } else if (
     authType === AuthType.USE_GEMINI ||

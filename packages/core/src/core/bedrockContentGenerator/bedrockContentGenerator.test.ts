@@ -51,7 +51,7 @@ describe('BedrockContentGenerator', () => {
         text: vi.fn().mockResolvedValue(
           JSON.stringify({
             id: 'msg-bedrock-1',
-            model: 'anthropic.claude-sonnet-4-6',
+            model: 'us.anthropic.claude-sonnet-4-6',
             stop_reason: 'end_turn',
             content: [{ type: 'text', text: 'first' }],
             usage: {
@@ -69,7 +69,7 @@ describe('BedrockContentGenerator', () => {
         text: vi.fn().mockResolvedValue(
           JSON.stringify({
             id: 'msg-bedrock-2',
-            model: 'anthropic.claude-sonnet-4-6',
+            model: 'us.anthropic.claude-sonnet-4-6',
             stop_reason: 'end_turn',
             content: [{ type: 'text', text: 'second' }],
             usage: {
@@ -84,7 +84,7 @@ describe('BedrockContentGenerator', () => {
 
     const generator = new BedrockContentGenerator(
       {
-        model: 'anthropic.claude-sonnet-4-6',
+        model: 'us.anthropic.claude-sonnet-4-6',
         apiKey: 'unused-because-env-is-set',
         timeout: 10_000,
         maxRetries: 0,
@@ -118,7 +118,7 @@ describe('BedrockContentGenerator', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const firstCall = fetchMock.mock.calls[0];
     expect(firstCall?.[0]).toBe(
-      'https://bedrock-runtime.us-west-2.amazonaws.com/model/anthropic.claude-sonnet-4-6/invoke',
+      'https://bedrock-runtime.us-west-2.amazonaws.com/model/us.anthropic.claude-sonnet-4-6/invoke',
     );
 
     const requestInit = firstCall?.[1] as RequestInit;

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export const BEDROCK_MODEL_ID = 'anthropic.claude-sonnet-4-6';
+export const BEDROCK_MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 export const BEDROCK_API_KEY_ENV = 'AWS_BEARER_TOKEN_BEDROCK';
 export const BEDROCK_DEFAULT_REGION = 'us-east-1';
 
