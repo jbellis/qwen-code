@@ -21,6 +21,7 @@ import {
   FatalInputError,
   ApprovalMode,
   SendMessageType,
+  ToolNames,
 } from '@qwen-code/qwen-code-core';
 import type { Part } from '@google/genai';
 import { runNonInteractive } from './nonInteractiveCli.js';
@@ -132,6 +133,8 @@ describe('runNonInteractive', () => {
       getTool: vi.fn(),
       getFunctionDeclarations: vi.fn().mockReturnValue([]),
       getAllToolNames: vi.fn().mockReturnValue([]),
+      getDeferredToolSummary: vi.fn().mockReturnValue([]),
+      isDeferredToolRevealed: vi.fn().mockReturnValue(false),
     } as unknown as ToolRegistry;
 
     mockBackgroundTaskRegistry = {
@@ -153,6 +156,7 @@ describe('runNonInteractive', () => {
 
     mockGeminiClient = {
       sendMessageStream: vi.fn(),
+      addHistory: vi.fn().mockResolvedValue(undefined),
       consumePendingMemoryTaskPromises: vi.fn().mockReturnValue([]),
       recordCompletedToolCall: vi.fn(),
       getChatRecordingService: vi.fn(() => ({
@@ -622,6 +626,141 @@ describe('runNonInteractive', () => {
 
     // 6. Assert the final output is correct
     expect(processStdoutSpy).toHaveBeenCalledWith('Summary complete.\n');
+  });
+
+  it('bootstraps bifrost deferred tools via synthetic tool_search before the first headless turn', async () => {
+    setupMetricsMock();
+    vi.mocked(mockConfig.getMcpServers).mockReturnValue({
+      bifrost: { command: 'bifrost' },
+    } as never);
+    vi.mocked(mockToolRegistry.getTool as Mock).mockImplementation(
+      (name: string) => (name === ToolNames.TOOL_SEARCH ? ({} as never) : null),
+    );
+    vi.mocked(mockToolRegistry.getDeferredToolSummary as Mock).mockReturnValue([
+      { name: 'mcp__bifrost__beta', description: 'beta' },
+      { name: 'mcp__bifrost__alpha', description: 'alpha' },
+      { name: 'mcp__other__skip', description: 'skip' },
+    ]);
+    vi.mocked(
+      mockToolRegistry.isDeferredToolRevealed as Mock,
+    ).mockImplementation((name: string) => name === 'mcp__other__skip');
+    mockCoreExecuteToolCall.mockResolvedValue({
+      responseParts: [
+        {
+          functionResponse: {
+            name: ToolNames.TOOL_SEARCH,
+            response: {
+              output:
+                '<functions><function>{"name":"mcp__bifrost__alpha"}</function></functions>',
+            },
+          },
+        },
+      ],
+      resultDisplay: 'Loaded 2 tool(s)',
+    });
+
+    const events: ServerGeminiStreamEvent[] = [
+      { type: GeminiEventType.Content, value: 'ready' },
+      {
+        type: GeminiEventType.Finished,
+        value: { reason: undefined, usageMetadata: { totalTokenCount: 10 } },
+      },
+    ];
+    mockGeminiClient.sendMessageStream.mockReturnValue(
+      createStreamFromEvents(events),
+    );
+
+    await runNonInteractive(
+      mockConfig,
+      mockSettings,
+      'Use bifrost',
+      'prompt-id-bifrost',
+    );
+
+    expect(mockCoreExecuteToolCall).toHaveBeenNthCalledWith(
+      1,
+      mockConfig,
+      expect.objectContaining({
+        name: ToolNames.TOOL_SEARCH,
+        args: {
+          query: 'select:mcp__bifrost__alpha,mcp__bifrost__beta',
+          max_results: 2,
+        },
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(mockGeminiClient.addHistory).toHaveBeenNthCalledWith(1, {
+      role: 'model',
+      parts: [
+        {
+          functionCall: {
+            id: 'synthetic-bifrost-tool-search-prompt-id-bifrost',
+            name: ToolNames.TOOL_SEARCH,
+            args: {
+              query: 'select:mcp__bifrost__alpha,mcp__bifrost__beta',
+              max_results: 2,
+            },
+          },
+        },
+      ],
+    });
+    expect(mockGeminiClient.addHistory).toHaveBeenNthCalledWith(2, {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            name: ToolNames.TOOL_SEARCH,
+            response: {
+              output:
+                '<functions><function>{"name":"mcp__bifrost__alpha"}</function></functions>',
+            },
+          },
+        },
+      ],
+    });
+    expect(mockCoreExecuteToolCall.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGeminiClient.sendMessageStream.mock.invocationCallOrder[0],
+    );
+    expect(mockGeminiClient.sendMessageStream).toHaveBeenCalledWith(
+      [{ text: 'Use bifrost' }],
+      expect.any(AbortSignal),
+      'prompt-id-bifrost',
+      { type: SendMessageType.UserQuery },
+    );
+  });
+
+  it('skips synthetic bifrost bootstrap when no unrevealed bifrost deferred tools exist', async () => {
+    setupMetricsMock();
+    vi.mocked(mockConfig.getMcpServers).mockReturnValue({
+      bifrost: { command: 'bifrost' },
+    } as never);
+    vi.mocked(mockToolRegistry.getTool as Mock).mockImplementation(
+      (name: string) => (name === ToolNames.TOOL_SEARCH ? ({} as never) : null),
+    );
+    vi.mocked(mockToolRegistry.getDeferredToolSummary as Mock).mockReturnValue([
+      { name: 'mcp__other__skip', description: 'skip' },
+    ]);
+
+    const events: ServerGeminiStreamEvent[] = [
+      { type: GeminiEventType.Content, value: 'ready' },
+      {
+        type: GeminiEventType.Finished,
+        value: { reason: undefined, usageMetadata: { totalTokenCount: 10 } },
+      },
+    ];
+    mockGeminiClient.sendMessageStream.mockReturnValue(
+      createStreamFromEvents(events),
+    );
+
+    await runNonInteractive(
+      mockConfig,
+      mockSettings,
+      'Use bifrost',
+      'prompt-id-no-bootstrap',
+    );
+
+    expect(mockCoreExecuteToolCall).not.toHaveBeenCalled();
+    expect(mockGeminiClient.addHistory).not.toHaveBeenCalled();
   });
 
   it('should process input and write JSON output with stats', async () => {

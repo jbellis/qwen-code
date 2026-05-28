@@ -258,15 +258,11 @@ describe('ToolSearchTool', () => {
     expect(content).toContain('No tools found matching');
   });
 
-  it('enforces max_results cap — schema rejects values above HARD_MAX_RESULTS', () => {
+  it('accepts large max_results values at validation time', () => {
     const tool = new ToolSearchTool(config);
-    // Schema declares maximum: 20, so out-of-range values fail at
-    // validate-time (before reaching the internal clamp). Pin the
-    // contract so the model can't sneak in absurd page sizes that
-    // bypass the cap by some path.
-    expect(() => tool.build({ query: 'slack', max_results: 100 })).toThrow(
-      /max_results must be <= 20/,
-    );
+    expect(() =>
+      tool.build({ query: 'slack', max_results: 100 }),
+    ).not.toThrow();
   });
 
   it('caps results at HARD_MAX_RESULTS for an in-range request', async () => {
@@ -293,13 +289,7 @@ describe('ToolSearchTool', () => {
     expect(matches).toBeGreaterThan(0);
   });
 
-  it('caps select: mode by max_results and surfaces dropped names', async () => {
-    // Without a cap, `select:a,b,c,...` would unbound the result size:
-    // the public schema advertises max_results but only the keyword
-    // path used to honor it. With the cap, repeated/long select lists
-    // get truncated to the first N after dedup; the dropped names are
-    // surfaced in llmContent so the model can re-issue for them
-    // instead of assuming they were loaded.
+  it('does not cap select: mode by max_results', async () => {
     for (let i = 0; i < 10; i++) {
       registry.registerTool(
         new MockTool({ name: `tool_${i}`, shouldDefer: true }),
@@ -315,15 +305,8 @@ describe('ToolSearchTool', () => {
 
     const content = String(result.llmContent);
     const blocks = (content.match(/<function>/g) ?? []).length;
-    expect(blocks).toBe(3);
-    // Truncation note tells the model exactly what was dropped.
-    expect(content).toContain('Truncated by max_results');
-    expect(content).toContain('tool_3');
-    expect(content).toContain('tool_6');
-    // The first three were loaded — they should NOT appear in the
-    // truncated list.
-    const truncatedSection = content.split('Truncated by max_results')[1] ?? '';
-    expect(truncatedSection).not.toContain('tool_0');
+    expect(blocks).toBe(7);
+    expect(content).not.toContain('Truncated by max_results');
   });
 
   it('revealed tools show up in subsequent getFunctionDeclarations', async () => {

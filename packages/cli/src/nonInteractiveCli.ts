@@ -81,6 +81,7 @@ const STRUCTURED_SHUTDOWN_HOLDBACK_MS = 500;
 const SUPPRESSED_OUTPUT_SUCCESS =
   "Skipped: this turn's structured_output contract took precedence as the terminal output.";
 const SUPPRESSED_OUTPUT_RETRY = `${SUPPRESSED_OUTPUT_SUCCESS} Re-issue this call in a separate turn if needed.`;
+const SYNTHETIC_BIFROST_TOOL_SEARCH_CALL_ID = 'synthetic-bifrost-tool-search';
 function suppressedOutputBody(structuredCaptured: boolean): string {
   return structuredCaptured
     ? SUPPRESSED_OUTPUT_SUCCESS
@@ -178,6 +179,101 @@ async function emitNonInteractiveFinalMessage(params: {
     stats,
     summary: message,
   });
+}
+
+function buildSyntheticBifrostToolSearchRequest(
+  config: Config,
+  promptId: string,
+): ToolCallRequestInfo | null {
+  const mcpServers = config.getMcpServers();
+  if (!mcpServers?.['bifrost']) {
+    return null;
+  }
+
+  const toolRegistry = config.getToolRegistry();
+  if (!toolRegistry.getTool(ToolNames.TOOL_SEARCH)) {
+    return null;
+  }
+
+  const bifrostTools = toolRegistry
+    .getDeferredToolSummary()
+    .map((tool) => tool.name)
+    .filter(
+      (name) =>
+        name.startsWith('mcp__bifrost__') &&
+        !toolRegistry.isDeferredToolRevealed(name),
+    )
+    .sort((a, b) => a.localeCompare(b));
+
+  if (bifrostTools.length === 0) {
+    return null;
+  }
+
+  return {
+    callId: `${SYNTHETIC_BIFROST_TOOL_SEARCH_CALL_ID}-${promptId}`,
+    name: ToolNames.TOOL_SEARCH,
+    args: {
+      query: `select:${bifrostTools.join(',')}`,
+      max_results: bifrostTools.length,
+    },
+    isClientInitiated: false,
+    prompt_id: promptId,
+  };
+}
+
+async function bootstrapBifrostToolSearchForHeadless(
+  config: Config,
+  promptId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const request = buildSyntheticBifrostToolSearchRequest(config, promptId);
+  if (!request) {
+    return;
+  }
+
+  const toolResponse = await executeToolCall(config, request, signal);
+  if (toolResponse.error || !toolResponse.responseParts?.length) {
+    debugLogger.warn(
+      'Synthetic Bifrost tool_search bootstrap failed; continuing without injection.',
+      toolResponse.error,
+    );
+    return;
+  }
+
+  const geminiClient = config.getGeminiClient() as {
+    addHistory?: (content: Content) => Promise<void> | void;
+    recordCompletedToolCall?: (
+      name: string,
+      args: Record<string, unknown>,
+    ) => void;
+  };
+  if (typeof geminiClient.addHistory !== 'function') {
+    debugLogger.warn(
+      'GeminiClient.addHistory unavailable; skipping synthetic Bifrost bootstrap history injection.',
+    );
+    return;
+  }
+
+  await geminiClient.addHistory({
+    role: 'model',
+    parts: [
+      {
+        functionCall: {
+          id: request.callId,
+          name: request.name,
+          args: request.args,
+        },
+      },
+    ],
+  });
+  await geminiClient.addHistory({
+    role: 'user',
+    parts: toolResponse.responseParts,
+  });
+  geminiClient.recordCompletedToolCall?.(
+    request.name,
+    request.args as Record<string, unknown>,
+  );
 }
 
 /**
@@ -467,6 +563,12 @@ export async function runNonInteractive(
           debugLogger.warn(`worktree restore failed (non-fatal):`, error);
         }
       }
+
+      await bootstrapBifrostToolSearchForHeadless(
+        config,
+        prompt_id,
+        abortController.signal,
+      );
 
       const initialParts = normalizePartList(initialPartList);
       let currentMessages: Content[] = [{ role: 'user', parts: initialParts }];

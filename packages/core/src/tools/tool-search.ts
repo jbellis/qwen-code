@@ -94,23 +94,15 @@ class ToolSearchInvocation extends BaseToolInvocation<
       };
     }
 
-    const maxResults = clamp(
-      this.params.max_results ?? DEFAULT_MAX_RESULTS,
-      1,
-      HARD_MAX_RESULTS,
-    );
-
     // Mode 1: exact lookup via `select:Name1,Name2`. Dedupe so the same tool
     // isn't returned multiple times when the model writes the same name twice.
-    // Cap at maxResults — without a cap, `select:a,b,c,...` would return
-    // an unbounded number of full schemas (token bloat). When truncation
-    // happens, surface the dropped names in the result so the model knows
-    // to re-issue another ToolSearch for them instead of silently
-    // assuming they were loaded.
+    // Exact mode allows callers to request the full set explicitly. The
+    // keyword path below stays capped/ranked; `select:` is the escape hatch
+    // for deterministic "load these exact tools" flows such as headless
+    // startup bootstrap.
     if (query.toLowerCase().startsWith('select:')) {
       const seen = new Set<string>();
       const names: string[] = [];
-      const truncated: string[] = [];
       for (const raw of query.slice('select:'.length).split(',')) {
         // The deferred-tools system prompt section renders names as JSON
         // string literals ("cron_list"), so models often paste them back
@@ -123,14 +115,16 @@ class ToolSearchInvocation extends BaseToolInvocation<
         const key = stripped.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
-        if (names.length >= maxResults) {
-          truncated.push(stripped);
-          continue;
-        }
         names.push(stripped);
       }
-      return this.loadAndReturnSchemas(names, truncated);
+      return this.loadAndReturnSchemas(names);
     }
+
+    const maxResults = clamp(
+      this.params.max_results ?? DEFAULT_MAX_RESULTS,
+      1,
+      HARD_MAX_RESULTS,
+    );
 
     // Mode 2: keyword search. Require-word prefix with "+" boosts mandatory
     // terms; any tool missing a required term is excluded before scoring.
@@ -409,7 +403,6 @@ export class ToolSearchTool extends BaseDeclarativeTool<
             type: 'integer',
             description: 'Maximum number of results to return (default: 5)',
             minimum: 1,
-            maximum: HARD_MAX_RESULTS,
             default: DEFAULT_MAX_RESULTS,
           },
         },
