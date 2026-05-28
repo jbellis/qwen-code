@@ -75,10 +75,8 @@ describe('FileReadCache', () => {
 
     it('returns unknown — not stale — when only the inode differs', () => {
       // rm + recreate scenario: same path, brand-new inode. The cache is
-      // keyed by inode, so the new file is genuinely a stranger. Edit /
-      // WriteFile callers will treat this as "must read first", which is
-      // the safer semantics than "stale" (which implies "you knew an
-      // earlier version of this exact file").
+      // keyed by inode, so the new file is genuinely a stranger rather
+      // than a stale version of the original file.
       const cache = new FileReadCache();
       cache.recordRead('/x/foo.ts', makeStats({ ino: 100 }), {
         full: true,
@@ -263,12 +261,8 @@ describe('FileReadCache', () => {
     });
 
     it('seeds read metadata when recording a write on a brand-new entry', () => {
-      // The model authored the bytes it just wrote — for the purposes
-      // of prior-read enforcement on the *next* Edit, that counts as
-      // having seen the full text content. Without this seeding a
-      // create→edit→edit chain would reject the second edit because
-      // lastReadWasFull / lastReadCacheable would still be unset on
-      // the entry recordWrite created.
+      // The model authored the bytes it just wrote, so the cache can
+      // treat the full text content as resident after the write.
       const cache = new FileReadCache();
       const entry = cache.recordWrite('/x/foo.ts', makeStats());
       expect(entry.lastReadAt).toBeDefined();
@@ -294,10 +288,9 @@ describe('FileReadCache', () => {
 
     it('refreshes lastReadAt to match the write — the author saw all bytes', () => {
       // recordWrite always re-stamps the read metadata: the model
-      // authored the bytes it just wrote, so for prior-read
-      // enforcement purposes it now counts as having seen the full
-      // current content, regardless of whatever partial / ranged /
-      // non-cacheable read happened earlier in the session.
+      // authored the bytes it just wrote, so the cache now treats the
+      // full current content as resident regardless of whatever
+      // partial / ranged / non-cacheable read happened earlier.
       const cache = new FileReadCache();
       const stats = makeStats();
       cache.recordRead('/x/foo.ts', stats, { full: true, cacheable: true });
@@ -312,10 +305,8 @@ describe('FileReadCache', () => {
     });
 
     it('upgrades lastReadWasFull / lastReadCacheable after a full write', () => {
-      // Reproduction for the gap reviewer flagged: ReadFile(limit=10)
-      // → WriteFile(full) → Edit. Pre-fix, the partial read's
-      // lastReadWasFull=false persisted through the write and the
-      // Edit would be rejected with EDIT_REQUIRES_PRIOR_READ.
+      // A partial read's lastReadWasFull=false must not persist after
+      // a full write authored by the model.
       const cache = new FileReadCache();
       const stats = makeStats();
       cache.recordRead('/x/foo.ts', stats, { full: false, cacheable: true });
@@ -534,7 +525,7 @@ describe('FileReadCache', () => {
       expect(entry.readResidentInHistory).toBe(true);
     });
 
-    it('markReadEvictedFromHistory disarms only the fast-path, preserving read-before-write state', () => {
+    it('markReadEvictedFromHistory disarms only the fast-path metadata', () => {
       const cache = new FileReadCache();
       const stats = makeStats();
       cache.recordRead('/x/foo.ts', stats, { full: true, cacheable: true });
@@ -546,7 +537,7 @@ describe('FileReadCache', () => {
       if (result.state === 'fresh') {
         // Fast-path disarmed...
         expect(result.entry.readResidentInHistory).toBe(false);
-        // ...but everything read-before-write depends on is intact.
+        // ...but the rest of the cache metadata is intact.
         expect(result.entry.lastReadAt).toBeDefined();
         expect(result.entry.lastReadWasFull).toBe(true);
         expect(result.entry.lastReadCacheable).toBe(true);

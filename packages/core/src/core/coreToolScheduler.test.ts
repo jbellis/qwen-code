@@ -31,7 +31,7 @@ import {
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SkillTool } from '../tools/skill.js';
-import { StructuredToolError } from '../tools/priorReadEnforcement.js';
+import { StructuredToolError } from '../tools/tool-error.js';
 import { ToolNames, ToolNamesMigration } from '../tools/tool-names.js';
 import type { ToolCall, WaitingToolCall } from './coreToolScheduler.js';
 import {
@@ -846,15 +846,12 @@ describe('CoreToolScheduler', () => {
 
   it('surfaces error.errorType from a confirmation throw instead of UNHANDLED_EXCEPTION', async () => {
     // Without the explicitErrorType extraction in the scheduler's
-    // catch block, every getConfirmationDetails throw (including
-    // structured prior-read enforcement rejections) would collapse
-    // into UNHANDLED_EXCEPTION — losing the new
-    // EDIT_REQUIRES_PRIOR_READ / FILE_CHANGED_SINCE_READ /
-    // PRIOR_READ_VERIFICATION_FAILED / EDIT_NO_OCCURRENCE_FOUND /
-    // ... contracts that StructuredToolError exists to carry. Pin
-    // the propagation here.
+    // catch block, every getConfirmationDetails throw would collapse
+    // into UNHANDLED_EXCEPTION, losing the structured ToolErrorType
+    // contract that StructuredToolError exists to carry. Pin the
+    // propagation here.
     const declarativeTool = new StructuredErrorOnConfirmationTool(
-      ToolErrorType.EDIT_REQUIRES_PRIOR_READ,
+      ToolErrorType.EDIT_NO_OCCURRENCE_FOUND,
     );
 
     const mockToolRegistry = {
@@ -929,7 +926,7 @@ describe('CoreToolScheduler', () => {
       response: { errorType?: ToolErrorType };
     };
     expect(errored.response.errorType).toBe(
-      ToolErrorType.EDIT_REQUIRES_PRIOR_READ,
+      ToolErrorType.EDIT_NO_OCCURRENCE_FOUND,
     );
     expect(errored.response.errorType).not.toBe(
       ToolErrorType.UNHANDLED_EXCEPTION,

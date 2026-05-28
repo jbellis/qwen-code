@@ -134,9 +134,8 @@ describe('WriteFileTool', () => {
   });
 
   /**
-   * Simulate the model having read `filePath` earlier in the session,
-   * so the WriteFileTool's prior-read enforcement does not reject the
-   * subsequent overwrite. New-file creation paths do not need this.
+   * Seed the read cache for tests that assert cache state transitions.
+   * WriteFileTool no longer requires this before overwriting files.
    */
   function seedPriorRead(filePath: string) {
     const stats = fs.statSync(filePath);
@@ -403,31 +402,7 @@ describe('WriteFileTool', () => {
       expect(writtenContent).toBe(proposedContent);
     });
 
-    // Pin the upstream-aligned ordering: trackEdit MUST run before the
-    // pre-write checkPriorRead. The upstream `claude-code/src/tools/
-    // FileEditTool` comment on the equivalent block says:
-    //
-    //   "These awaits must stay OUTSIDE the critical section below — a
-    //    yield between the staleness check and writeTextContent lets
-    //    concurrent edits interleave."
-    //
-    // Without this ordering the multi-hundred-ms `trackEdit` sat
-    // between checkPriorRead and writeTextFile, widening the
-    // already-acknowledged stat-then-write race window.
-    //
-    // Test strategy: install a `trackEdit` mock that mutates the file
-    // on disk before returning. That mutation must be detected by the
-    // pre-write `checkPriorRead`. That only happens if `trackEdit`
-    // runs BEFORE the pre-write check — the broken ordering would run
-    // the pre-write check first (passing on pre-mutation stats), then
-    // trackEdit (which mutates), then write (which clobbers the
-    // external mutation silently).
-    //
-    // Asserting on `result.error` directly tests the behavioral
-    // invariant rather than the call-ordering proxy, so it survives
-    // future refactors that preserve the invariant even if they shift
-    // the number of `cache.check` calls.
-    it('backs up before the pre-write freshness check (TOCTOU ordering)', async () => {
+    it('continues the write when trackEdit observes a changed mtime', async () => {
       const filePath = path.join(rootDir, 'toctou_ordering.txt');
       const initialContent = 'pre-existing content';
       fs.writeFileSync(filePath, initialContent, 'utf8');
@@ -460,13 +435,9 @@ describe('WriteFileTool', () => {
       }
       const result = await invocation.execute(abortSignal);
 
-      // trackEdit must have actually fired.
       expect(mockFileHistoryService.trackEdit).toHaveBeenCalledWith(filePath);
-      // The pre-write check must have caught the in-trackEdit mutation
-      // and rejected, proving trackEdit ran BEFORE the pre-write check.
-      expect(result.error?.type).toBe(ToolErrorType.FILE_CHANGED_SINCE_READ);
-      // The file on disk is unchanged (rejected, not overwritten).
-      expect(fs.readFileSync(filePath, 'utf8')).toBe(initialContent);
+      expect(result.error).toBeUndefined();
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('new content');
     });
 
     it('should overwrite an existing file and return diff', async () => {
@@ -985,8 +956,6 @@ describe('WriteFileTool', () => {
       // counted as a creation, even though both old contents are
       // length-0.
       fs.writeFileSync(filePath, '', 'utf8');
-      // Prior-read enforcement (origin/main #3774) requires the file
-      // to have been Read before WriteFile can overwrite it.
       seedPriorRead(filePath);
 
       const invocation = tool.build({
@@ -1004,133 +973,23 @@ describe('WriteFileTool', () => {
     });
   });
 
-  describe('prior-read enforcement', () => {
+  describe('writing without prior read', () => {
     const abortSignal = new AbortController().signal;
 
-    it('rejects a write that would overwrite an unread existing file', async () => {
+    it('overwrites an existing file without a prior read', async () => {
       const filePath = path.join(rootDir, 'enforce-overwrite.txt');
       fs.writeFileSync(filePath, 'untouched bytes', 'utf-8');
-      // No seedPriorRead — model has not Read this file in the session.
-
-      // Spy on readTextFile to assert enforcement runs *before* any
-      // I/O against the file's contents — see the L4 review comment.
-      const readSpy = vi.spyOn(fsService, 'readTextFile');
 
       const params = { file_path: filePath, content: 'clobber attempt' };
       const result = await tool.build(params).execute(abortSignal);
 
-      expect(result.error?.type).toBe(ToolErrorType.EDIT_REQUIRES_PRIOR_READ);
-      expect(result.error?.message).toMatch(
-        /has not been read in this session/,
-      );
-      // File must remain at its pre-call content, and the tool must
-      // not have slurped the existing bytes into memory before
-      // rejecting.
-      expect(fs.readFileSync(filePath, 'utf-8')).toBe('untouched bytes');
-      expect(readSpy).not.toHaveBeenCalled();
-
-      readSpy.mockRestore();
-      fs.unlinkSync(filePath);
-    });
-
-    it('allows a write after a ranged (offset/limit) read', async () => {
-      // Aligns WriteFile with EditTool and Claude Code's
-      // `readFileState`: any prior read clears enforcement. The
-      // earlier asymmetric stance (full read required for
-      // overwrite, partial OK for Edit) created a deadlock on
-      // files larger than the truncate-tool-output limit, where
-      // `read_file` without offset/limit still produced a
-      // truncated read and there was no way to satisfy the
-      // "fully read" precondition (issue #3945). The mtime/size
-      // drift check is the gate that distinguishes "model has
-      // seen current bytes" from "model has seen older bytes",
-      // and it fires identically for Edit and WriteFile.
-      const filePath = path.join(rootDir, 'enforce-ranged.txt');
-      fs.writeFileSync(filePath, 'unchanged', 'utf-8');
-      const stats = fs.statSync(filePath);
-      fileReadCache.recordRead(filePath, stats, {
-        full: false,
-        cacheable: true,
-      });
-
-      const result = await tool
-        .build({ file_path: filePath, content: 'clobber' })
-        .execute(abortSignal);
       expect(result.error).toBeUndefined();
-      expect(fs.readFileSync(filePath, 'utf-8')).toBe('clobber');
-
-      fs.unlinkSync(filePath);
-    });
-
-    it('allows a write after a truncated full read (issue #3945 deadlock fix)', async () => {
-      // Pre-fix, a `read_file` without offset/limit on a file larger
-      // than the truncate-tool-output limit recorded
-      // `lastReadWasFull: false` (the model only saw the head), and
-      // WriteFile's `requireFullRead: true` rejected the follow-up
-      // overwrite with "only been partially read … re-read without
-      // offset / limit / pages" — but a re-read produces the same
-      // truncated state, deadlocking the user. After dropping
-      // `requireFullRead` (aligning with Claude Code), the truncated
-      // read is enough to clear enforcement; the mtime/size drift
-      // check remains the gate that distinguishes "model saw current
-      // bytes" from "model saw older bytes".
-      //
-      // Coverage split: this test seeds the cache directly (mockConfig
-      // here lacks the `getFileService` / `getTruncateToolOutputLines`
-      // / `getTruncateToolOutputThreshold` / `getContentGeneratorConfig`
-      // wiring ReadFileTool needs). The matching ReadFile-side coverage
-      // that *produces* `{ full: false, cacheable: true }` for a
-      // truncated full read lives in read-file.test.ts under "records
-      // truncated full reads with lastReadCacheable=true (issue #3964)".
-      // A future cache-entry schema change must update both halves to
-      // keep the deadlock-free guarantee end-to-end.
-      const filePath = path.join(rootDir, 'enforce-truncated-full.txt');
-      fs.writeFileSync(filePath, 'unchanged', 'utf-8');
-      const stats = fs.statSync(filePath);
-      fileReadCache.recordRead(filePath, stats, {
-        // `full: false` is what a truncated full read records
-        // (read-file.ts: `full: isFullRead && !result.isTruncated`).
-        full: false,
-        cacheable: true,
-      });
-
-      const result = await tool
-        .build({ file_path: filePath, content: 'rewritten' })
-        .execute(abortSignal);
-      expect(result.error).toBeUndefined();
-      expect(fs.readFileSync(filePath, 'utf-8')).toBe('rewritten');
-
-      fs.unlinkSync(filePath);
-    });
-
-    it('rejects a write when the previous read was non-cacheable', async () => {
-      const filePath = path.join(rootDir, 'enforce-noncacheable.txt');
-      fs.writeFileSync(filePath, 'pretend binary', 'utf-8');
-      const stats = fs.statSync(filePath);
-      fileReadCache.recordRead(filePath, stats, {
-        full: true,
-        cacheable: false,
-      });
-
-      const result = await tool
-        .build({ file_path: filePath, content: 'clobber' })
-        .execute(abortSignal);
-      expect(result.error?.type).toBe(ToolErrorType.EDIT_REQUIRES_PRIOR_READ);
-      expect(result.error?.message).toContain('notebook_edit');
-      // Verb in the dead-end guidance must read correctly for
-      // overwrite (the WriteFile path), not "edit".
-      expect(result.error?.message).toMatch(/if you need to overwrite it\./);
+      expect(fs.readFileSync(filePath, 'utf-8')).toBe('clobber attempt');
 
       fs.unlinkSync(filePath);
     });
 
     it('confirmation falls back to a new-file diff when the file disappears mid-flight', async () => {
-      // isFilefileExists() saw the file. Between that and the
-      // readTextFile inside getConfirmationDetails, an external
-      // process deletes it. Pre-fix, readTextFile threw ENOENT and
-      // the confirmation collapsed into UNHANDLED_EXCEPTION; the new
-      // catch falls back to fileExists=false so the user sees the
-      // brand-new-file diff instead.
       const filePath = path.join(rootDir, 'enforce-disappear.txt');
       fs.writeFileSync(filePath, 'will disappear', 'utf-8');
       seedPriorRead(filePath);
@@ -1160,73 +1019,26 @@ describe('WriteFileTool', () => {
       }
     });
 
-    it('rejects confirmation requests on an unread existing file before showing a diff', async () => {
+    it('shows a confirmation diff for an existing file without a prior read', async () => {
       const filePath = path.join(rootDir, 'enforce-confirm.txt');
       fs.writeFileSync(filePath, 'unread current bytes', 'utf-8');
       const invocation = tool.build({
         file_path: filePath,
         content: 'replacement content',
       });
-      await expect(
-        invocation.getConfirmationDetails(abortSignal),
-      ).rejects.toThrow(/has not been read in this session/);
-
-      fs.unlinkSync(filePath);
-    });
-
-    it('attaches a structured ToolErrorType when getConfirmationDetails rejects', async () => {
-      // The thrown error must carry `errorType` so the scheduler
-      // surfaces EDIT_REQUIRES_PRIOR_READ instead of
-      // UNHANDLED_EXCEPTION on approval-required flows.
-      const filePath = path.join(rootDir, 'enforce-confirm-type.txt');
-      fs.writeFileSync(filePath, 'unread current bytes', 'utf-8');
-      const invocation = tool.build({
-        file_path: filePath,
-        content: 'replacement content',
-      });
-      let caught: unknown;
-      try {
-        await invocation.getConfirmationDetails(abortSignal);
-      } catch (err) {
-        caught = err;
-      }
-      expect((caught as { errorType?: string })?.errorType).toBe(
-        ToolErrorType.EDIT_REQUIRES_PRIOR_READ,
+      const confirmation = await invocation.getConfirmationDetails(abortSignal);
+      expect(confirmation).toEqual(
+        expect.objectContaining({
+          type: 'edit',
+          originalContent: 'unread current bytes',
+          newContent: 'replacement content',
+        }),
       );
+
       fs.unlinkSync(filePath);
     });
 
-    it('rejects a write with a stat failure other than ENOENT (fail-closed)', async () => {
-      // checkPriorRead must NOT default to ok:true when stat fails
-      // for reasons other than disappearance race (EACCES, EBUSY,
-      // NFS hiccup, ...). Doing so reopens the blind-write path on
-      // transient metadata errors.
-      const filePath = path.join(rootDir, 'enforce-stat-fail.txt');
-      fs.writeFileSync(filePath, 'untouched', 'utf-8');
-      const statSpy = vi
-        .spyOn(fs.promises, 'stat')
-        .mockRejectedValueOnce(
-          Object.assign(new Error('EACCES'), { code: 'EACCES' }),
-        );
-
-      const result = await tool
-        .build({ file_path: filePath, content: 'clobber' })
-        .execute(abortSignal);
-      // Distinct error code: the model may have legitimately read the
-      // file — we just cannot verify because stat itself failed.
-      // EDIT_REQUIRES_PRIOR_READ would imply "definitely not read".
-      expect(result.error?.type).toBe(
-        ToolErrorType.PRIOR_READ_VERIFICATION_FAILED,
-      );
-      expect(result.error?.message).toMatch(/Could not stat .*\(EACCES\)/);
-      // File untouched.
-      expect(fs.readFileSync(filePath, 'utf-8')).toBe('untouched');
-
-      statSpy.mockRestore();
-      fs.unlinkSync(filePath);
-    });
-
-    it('rejects a write when the file has been modified since the last read', async () => {
+    it('overwrites a file that changed after a previous read', async () => {
       const filePath = path.join(rootDir, 'enforce-stale.txt');
       fs.writeFileSync(filePath, 'one', 'utf-8');
       seedPriorRead(filePath);
@@ -1240,16 +1052,14 @@ describe('WriteFileTool', () => {
       };
       const result = await tool.build(params).execute(abortSignal);
 
-      expect(result.error?.type).toBe(ToolErrorType.FILE_CHANGED_SINCE_READ);
-      expect(result.error?.message).toMatch(/has been modified since/);
-      expect(fs.readFileSync(filePath, 'utf-8')).toBe('two with more bytes');
+      expect(result.error).toBeUndefined();
+      expect(fs.readFileSync(filePath, 'utf-8')).toBe('clobber the stale file');
 
       fs.unlinkSync(filePath);
     });
 
-    it('exempts new-file creation from prior-read enforcement', async () => {
+    it('creates a new file', async () => {
       const filePath = path.join(rootDir, 'enforce-new.txt');
-      // File does not exist; model has nothing to read first.
       const params = { file_path: filePath, content: 'fresh content' };
       const result = await tool.build(params).execute(abortSignal);
 
@@ -1257,23 +1067,6 @@ describe('WriteFileTool', () => {
       expect(fs.readFileSync(filePath, 'utf-8')).toBe('fresh content');
 
       fs.unlinkSync(filePath);
-    });
-
-    it('bypasses enforcement entirely when fileReadCacheDisabled is true', async () => {
-      const filePath = path.join(rootDir, 'enforce-bypass.txt');
-      fs.writeFileSync(filePath, 'untouched', 'utf-8');
-      const original = mockConfigInternal.getFileReadCacheDisabled;
-      mockConfigInternal.getFileReadCacheDisabled = () => true;
-
-      try {
-        const params = { file_path: filePath, content: 'clobbered' };
-        const result = await tool.build(params).execute(abortSignal);
-        expect(result.error).toBeUndefined();
-        expect(fs.readFileSync(filePath, 'utf-8')).toBe('clobbered');
-      } finally {
-        mockConfigInternal.getFileReadCacheDisabled = original;
-        fs.unlinkSync(filePath);
-      }
     });
   });
 });

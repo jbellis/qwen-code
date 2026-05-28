@@ -148,9 +148,8 @@ class ReadFileToolInvocation extends BaseToolInvocation<
     // fast-path lookup and the post-read record so behaviour matches
     // the pre-cache implementation byte-for-byte.
     //
-    // Auto-memory files are *recorded* in the cache (so prior-read
-    // enforcement on Edit / WriteFile recognises them as read) but
-    // never serve the file_unchanged placeholder — those files own a
+    // Auto-memory files are *recorded* in the cache, but never serve
+    // the file_unchanged placeholder — those files own a
     // per-read freshness `<system-reminder>` that must be re-emitted
     // on every read.
     const cacheEnabled = !this.config.getFileReadCacheDisabled();
@@ -217,27 +216,19 @@ class ReadFileToolInvocation extends BaseToolInvocation<
     }
 
     // Record a cache entry so that subsequent identical Reads can hit
-    // the file_unchanged fast-path, and so prior-read enforcement on
-    // Edit / WriteFile can recognise the read.
+    // the file_unchanged fast-path.
     //
     // Two independent flags are recorded:
     //
     //  - `cacheable` — whether the content is plain text (not binary /
-    //    image / audio / video / PDF / notebook). This is the flag
-    //    `priorReadEnforcement.ts` consults to decide whether the
-    //    model has seen a payload that Edit / WriteFile can mutate as
-    //    text. It must NOT include "was the read truncated", because
-    //    a truncated text read still produced text — bundling those
-    //    two concerns is what produced the issue #3964 regression
-    //    where a partial Read of a regular `.kt` / `.cpp` / `.py`
-    //    file caused the next Edit to be rejected with the
-    //    misleading "binary / image / audio / video / PDF / notebook
-    //    payload" error.
+    //    image / audio / video / PDF / notebook). It must NOT include
+    //    "was the read truncated", because a truncated text read still
+    //    produced text; bundling those two concerns caused issue #3964.
     //
     //  - `full` — whether the model has seen every byte of the
-    //    current file. This now gates ONLY the file_unchanged
-    //    fast-path; PR #4002 removed WriteFile's `requireFullRead`
-    //    (the truncate-tool-output limit made "fully read" an
+    //    current file. This gates the file_unchanged fast-path; PR
+    //    #4002 removed WriteFile's `requireFullRead` (the
+    //    truncate-tool-output limit made "fully read" an
     //    impossible precondition on files past the limit, deadlocking
     //    issue #3945). A "full" Read at the request level (no
     //    offset / limit / pages) only counts as full at the cache
@@ -255,14 +246,11 @@ class ReadFileToolInvocation extends BaseToolInvocation<
     // Falling back to a post-read re-stat would describe a possibly-
     // mutated file rather than the file the read returned: a write
     // landing between the read and the post-stat would let the cache
-    // record fingerprint Y for content the model only saw at X, and
-    // a follow-up Edit would pass enforcement (`fresh + full +
-    // cacheable @ Y`) against bytes the model never legitimately saw.
+    // record fingerprint Y for content the model only saw at X.
     //
     // Race residue: the internal-stat-to-actual-read window is still
     // a few microseconds wide. Closing it completely needs a content
-    // hash on the read pipeline (deferred follow-up — see Risk
-    // section in the PR description).
+    // hash on the read pipeline.
     if (cacheEnabled && (result.stats ?? stats)) {
       const cacheable =
         typeof result.llmContent === 'string' &&

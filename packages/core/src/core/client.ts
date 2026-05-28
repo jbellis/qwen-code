@@ -1282,8 +1282,8 @@ export class GeminiClient {
         if (mcResult.meta) {
           const m = mcResult.meta;
           this.getChat().setHistory(mcResult.history);
-          // Disarm only the blanked files' fast-path, keeping
-          // read-before-write state intact (issue #4239; rationale on
+          // Disarm only the blanked files' fast-path while preserving
+          // other cache metadata (issue #4239; rationale on
           // FileReadEntry.readResidentInHistory). Any blanked read we
           // can't disarm surgically forces the old blanket wipe so a
           // later Read can't get a dangling file_unchanged placeholder.

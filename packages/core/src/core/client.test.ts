@@ -1635,9 +1635,9 @@ describe('Gemini Client (client.ts)', () => {
     it('disarms the fast-path for blanked files instead of wiping the cache (issue #4239)', async () => {
       // Default test fixture: toolResultsThresholdMinutes = 60,
       // toolResultsNumToKeep = 5. Six read_file results + a 90-minute
-      // idle gap means the oldest one gets blanked. The read-before-write
-      // state must survive (no clear()); only the one blanked file's
-      // fast-path is disarmed via markReadEvictedFromHistory.
+      // idle gap means the oldest one gets blanked. The rest of the
+      // cache metadata must survive (no clear()); only the one blanked
+      // file's fast-path is disarmed via markReadEvictedFromHistory.
       const { clear, markReadEvictedFromHistory } = mockFileReadCacheStub();
 
       const { history } = await makeReadFileResponses(6);
@@ -1660,7 +1660,7 @@ describe('Gemini Client (client.ts)', () => {
       }
 
       expect(setHistory).toHaveBeenCalled();
-      // The blanket wipe is gone — read-before-write state is preserved.
+      // The blanket wipe is gone; cache metadata is preserved.
       expect(clear).not.toHaveBeenCalled();
       // Exactly the one blanked file (oldest of 6, keepRecent=5) had its
       // fast-path disarmed.

@@ -702,8 +702,7 @@ export class SubagentManager {
    * (`Object.create(runtimeContext)`): no method changes, but a distinct
    * instance triggers the lazy own-property init in
    * `Config.getFileReadCache()` so the subagent gets its own cache
-   * rather than inheriting the parent's recorded reads — which would
-   * silently weaken prior-read enforcement on its mutation paths.
+   * rather than inheriting the parent's recorded reads.
    *
    * The tool registry is also rebuilt on the override so `EditTool` /
    * `WriteFileTool` / `ReadFileTool` resolve `this.config` to the

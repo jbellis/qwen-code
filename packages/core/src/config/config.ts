@@ -3452,9 +3452,9 @@ export class Config {
   }
 
   /**
-   * When true, ReadFile / Edit / WriteFile must bypass the session
-   * FileReadCache entirely and behave as if it did not exist (no
-   * `file_unchanged` placeholder, no future prior-read enforcement).
+   * When true, ReadFile and notebook-specific cache checks bypass the
+   * session FileReadCache and behave as if it did not exist (no
+   * `file_unchanged` placeholder).
    * Intended as an escape hatch for sessions where the cache's "model
    * has already seen this content earlier in the conversation"
    * assumption is unreliable — e.g. after context compaction or

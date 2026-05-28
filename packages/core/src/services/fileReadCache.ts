@@ -67,17 +67,11 @@ export interface FileReadEntry {
    * check) to decide whether a follow-up "no-args" Read can return
    * a `file_unchanged` placeholder.
    *
-   * **`priorReadEnforcement.ts` does NOT consult this flag and must
-   * not start.** PR #3932 wired it into a `requireFullRead` option
-   * for WriteFile's overwrite path; PR #4002 removed that wiring
-   * because the truncate-tool-output limit makes "fully read" an
-   * impossible precondition on files larger than the limit (issue
-   * #3945 deadlock). The current contract aligns with Claude Code's
-   * `readFileState`: any prior read clears enforcement, the
-   * mtime/size drift check is the safety net. `fileReadCacheDisabled:
-   * true` is an OPT-OUT (it bypasses the cache and thus enforcement
-   * entirely so application-level locking can take over) — it is NOT
-   * an opt-in to stricter behaviour.
+   * Mutating tools no longer consult this flag. PR #3932 wired it into
+   * a `requireFullRead` option for WriteFile's overwrite path; PR #4002
+   * removed that wiring because the truncate-tool-output limit makes
+   * "fully read" an impossible precondition on files larger than the
+   * limit (issue #3945 deadlock).
    */
   lastReadWasFull: boolean;
   /**
@@ -95,14 +89,8 @@ export interface FileReadEntry {
    * the misleading "binary / image / audio / video / PDF / notebook
    * payload" error.
    *
-   * Two independent consumers read this flag:
-   *  - the ReadFile fast-path uses it (combined with
-   *    `lastReadWasFull`) to decide whether to serve the
-   *    `file_unchanged` placeholder.
-   *  - `priorReadEnforcement.ts` uses it to detect non-text payloads
-   *    and reject Edit / WriteFile against them (re-reading would
-   *    produce the same non-text payload, so the message tells the
-   *    model to use a different mechanism rather than re-read).
+   * The ReadFile fast-path uses it (combined with `lastReadWasFull`)
+   * to decide whether to serve the `file_unchanged` placeholder.
    */
   lastReadCacheable: boolean;
   /**
@@ -117,11 +105,9 @@ export interface FileReadEntry {
    * read does not make the whole file resident); flipped to `false` by
    * {@link markReadEvictedFromHistory} when microcompaction blanks it.
    *
-   * `priorReadEnforcement.ts` does NOT consult this flag and must not
-   * start: read-before-write only needs that the model saw the file
-   * and the on-disk fingerprint is current, neither of which history
-   * blanking invalidates. Wiping read-rights on idle cleanup was the
-   * issue #4239 false-block this whole marker exists to avoid.
+   * This marker exists for issue #4239: idle microcompaction can blank
+   * earlier read content from history, and the placeholder must not
+   * point at content the model can no longer quote back.
    */
   readResidentInHistory: boolean;
 }
@@ -150,7 +136,7 @@ export class FileReadCache {
    *    for full-request reads whose content was truncated by the
    *    truncate-tool-output limit; both leave the model without
    *    sight of every current byte. This gates the `file_unchanged`
-   *    fast-path and notebook-specific prior-read checks.
+   *    fast-path and notebook-specific edit checks.
    *  - `cacheable` — the produced content is plain text (vs. binary /
    *    image / audio / video / PDF / notebook). This flag is purely
    *    about content type, not about whether the read was complete:
@@ -227,16 +213,13 @@ export class FileReadCache {
    * Record a successful write (Edit, WriteFile, or any other tool that
    * mutates the file's bytes). After a write the on-disk mtime/size will
    * differ from any prior Read snapshot, so we refresh the cached
-   * fingerprint to the post-write Stats; otherwise the next Edit would
-   * see its own write as a "stale" external change.
+   * fingerprint to the post-write Stats; otherwise the next Read would
+   * treat the cache entry as stale.
    *
-   * Read metadata is **always** refreshed alongside the write, not
-   * just for brand-new entries: the model authored the current content
-   * produced by the mutating tool, so for prior-read enforcement purposes
-   * it has now "seen" the bytes that tool wrote. Plain text writers use
-   * the default `cacheable: true`; structured writers such as notebook cell
-   * editors can set `cacheable: false` so regular Edit / WriteFile still
-   * reject the file as a non-text payload.
+   * Read metadata is **always** refreshed alongside the write, not just
+   * for brand-new entries: the model authored the current content
+   * produced by the mutating tool. Plain text writers use the default
+   * `cacheable: true`; structured writers can set `cacheable: false`.
    */
   recordWrite(
     absPath: string,
@@ -287,9 +270,8 @@ export class FileReadCache {
    *
    * Surgical alternative to {@link clear} for microcompaction: only
    * {@link FileReadEntry.readResidentInHistory} is disarmed; the
-   * fingerprint / `lastReadAt` / `lastReadCacheable` that
-   * read-before-write depends on are preserved (that is the issue
-   * #4239 fix).
+   * fingerprint / `lastReadAt` / `lastReadCacheable` metadata is
+   * preserved (that is the issue #4239 fix).
    *
    * Returns `true` if a matching entry was found and disarmed; `false`
    * if there is no entry for `stats` (never tracked, or `stats`

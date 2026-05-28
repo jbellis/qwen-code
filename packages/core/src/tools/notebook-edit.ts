@@ -50,8 +50,7 @@ import {
   type NotebookCellType,
 } from '../utils/notebook.js';
 import { ToolDisplayNames, ToolNames } from './tool-names.js';
-import { ToolErrorType } from './tool-error.js';
-import { StructuredToolError } from './priorReadEnforcement.js';
+import { StructuredToolError, ToolErrorType } from './tool-error.js';
 import type {
   ModifiableDeclarativeTool,
   ModifyContext,

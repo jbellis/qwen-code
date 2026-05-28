@@ -846,13 +846,11 @@ describe('ReadFileTool', () => {
         expect(second.llmContent).toMatch(/Cannot display content of binary/);
       });
 
-      it('records an auto-memory read in the cache so a follow-up Edit can pass enforcement', async () => {
+      it('records auto-memory reads in the cache without serving placeholders', async () => {
         // Auto-memory files skip the file_unchanged fast-path (they
         // own a per-read freshness `<system-reminder>` that must be
         // re-emitted) but they MUST still be recorded in the cache
-        // — otherwise the prior-read enforcement on Edit / WriteFile
-        // would refuse to mutate a file the model legitimately just
-        // read. Put a file under .qwen/<auto-memory>/ via
+        // Put a file under .qwen/<auto-memory>/ via
         // QWEN_CODE_MEMORY_LOCAL=1 and assert recordRead happened.
         const previousLocal = process.env['QWEN_CODE_MEMORY_LOCAL'];
         process.env['QWEN_CODE_MEMORY_LOCAL'] = '1';
@@ -870,14 +868,8 @@ describe('ReadFileTool', () => {
           // Slow path returned the actual content (not a placeholder).
           expect(typeof result.llmContent).toBe('string');
           expect(result.llmContent).not.toMatch(/unchanged since/);
-          // The cache must contain the auto-memory file's entry, AND
-          // the entry must be in a shape that satisfies prior-read
-          // enforcement on Edit / WriteFile (fresh + lastReadAt set +
-          // full + cacheable). Asserting only `fresh` would let a
-          // future regression that records auto-memory reads as
-          // partial/non-cacheable slip through silently — those reads
-          // would still report fresh but enforcement would reject
-          // every follow-up Edit.
+          // The cache must contain the auto-memory file's entry and
+          // record it as a full, cacheable read.
           const status = fileReadCache.check(fs.statSync(memFile));
           expect(status.state).toBe('fresh');
           if (status.state === 'fresh') {
@@ -894,13 +886,12 @@ describe('ReadFileTool', () => {
         }
       });
 
-      it('records SVG-as-text reads with cacheable=true so a follow-up Edit passes enforcement', async () => {
+      it('records SVG-as-text reads with cacheable=true', async () => {
         // Pre-fix the SVG branch in fileUtils.ts returned content
         // without `originalLineCount`, which collapsed
         // ReadFileToolInvocation's `cacheable` derivation to
-        // false. EditTool's prior-read enforcement then mistook
-        // the just-read SVG for a "non-text payload" and rejected
-        // a subsequent in-place edit.
+        // false. That broke cache consumers that need to distinguish
+        // text from structured payloads.
         const svgPath = path.join(tempRootDir, 'icon.svg');
         await fsp.writeFile(
           svgPath,
@@ -912,9 +903,7 @@ describe('ReadFileTool', () => {
         expect(typeof result.llmContent).toBe('string');
         expect(result.returnDisplay).toMatch(/^Read SVG as text:/);
 
-        // The cache must record this as a full, cacheable read so
-        // that prior-read enforcement on Edit / WriteFile would
-        // recognise it as the model having seen the bytes.
+        // The cache must record this as a full, cacheable read.
         const status = fileReadCache.check(fs.statSync(svgPath));
         expect(status.state).toBe('fresh');
         if (status.state === 'fresh') {
@@ -924,19 +913,15 @@ describe('ReadFileTool', () => {
         }
       });
 
-      it('records partial text reads with lastReadCacheable=true so a follow-up Edit passes enforcement (issue #3964)', async () => {
+      it('records partial text reads with lastReadCacheable=true (issue #3964)', async () => {
         // Pre-fix, ReadFileToolInvocation derived `cacheable` as
         // `string && originalLineCount && !isTruncated`. A partial
         // read of a regular text file (offset/limit) sets
         // `isTruncated = true`, which collapsed `cacheable` to false
         // and recorded the entry as `lastReadCacheable: false`.
-        // priorReadEnforcement.ts then mistook this for "binary
-        // payload" on the next Edit and rejected the call with the
-        // misleading "binary / image / audio / video / PDF /
-        // notebook payload" error. Decoupling the truncation check
-        // from `cacheable` (truncation now lives on
-        // `lastReadWasFull`) means partial text reads correctly
-        // record as text-cacheable.
+        // Decoupling the truncation check from `cacheable`
+        // (truncation now lives on `lastReadWasFull`) means partial
+        // text reads correctly record as text-cacheable.
         const filePath = path.join(tempRootDir, 'partial.kt');
         const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`);
         await fsp.writeFile(filePath, lines.join('\n'), 'utf-8');
@@ -951,8 +936,7 @@ describe('ReadFileTool', () => {
           // ranged read leaves the model without sight of every
           // byte, so this stays false.
           expect(status.entry.lastReadWasFull).toBe(false);
-          // The bytes the model saw were text — Edit must accept
-          // this read.
+          // The bytes the model saw were text.
           expect(status.entry.lastReadCacheable).toBe(true);
         }
       });
@@ -980,8 +964,7 @@ describe('ReadFileTool', () => {
         if (status.state === 'fresh') {
           // Truncated → model has not seen every byte.
           expect(status.entry.lastReadWasFull).toBe(false);
-          // But the bytes are text, so Edit (which accepts partial
-          // reads) must not be rejected as "binary payload".
+          // But the bytes are text.
           expect(status.entry.lastReadCacheable).toBe(true);
         }
       });
@@ -996,8 +979,7 @@ describe('ReadFileTool', () => {
         // extension-based override in detectFileType skips the
         // content sample for known text extensions; verify that
         // routes through `processSingleFileContent` correctly and
-        // records the read as text-cacheable so a follow-up Edit
-        // passes prior-read enforcement.
+        // records the read as text-cacheable.
         //
         // We can't easily simulate a real encrypted volume in a
         // unit test, so we approximate by writing nominally text
@@ -1038,8 +1020,7 @@ describe('ReadFileTool', () => {
         // Build a fresh ReadFileTool with a Config whose cache is
         // disabled. Two consecutive full Reads must both return the
         // file content — never the placeholder, and the cache itself
-        // must remain empty so prior-read enforcement (added in a
-        // follow-up) cannot accidentally trip on a recorded entry.
+        // must remain empty.
         const isolatedCache = new FileReadCache();
         const disabledConfig = {
           getFileService: () => new FileDiscoveryService(tempRootDir),

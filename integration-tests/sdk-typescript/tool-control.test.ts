@@ -1435,10 +1435,7 @@ describe('Tool Control Parameters (E2E)', () => {
             session_id: crypto.randomUUID(),
             message: {
               role: 'user',
-              // Read-first instruction satisfies prior-read enforcement
-              // so the deny path is exercised by canUseTool, not by the
-              // write tool's pre-write guard.
-              content: 'Read test.txt and then write "modified" to it.',
+              content: 'Write "modified" to test.txt.',
             },
             parent_tool_use_id: null,
           };
@@ -1476,15 +1473,6 @@ describe('Tool Control Parameters (E2E)', () => {
               resultWaiter.notifyResult();
             }
           }
-
-          // Make the read-first dependency explicit: if the model
-          // skipped read_file, prior-read enforcement would surface
-          // EDIT_REQUIRES_PRIOR_READ instead of the canUseTool deny
-          // message we are asserting on below — fail fast with a
-          // clear signal instead of a confusing toContain mismatch.
-          const toolCalls = findToolCalls(messages);
-          const toolNames = toolCalls.map((tc) => tc.toolUse.name);
-          expect(toolNames).toContain('read_file');
 
           // write_file should have been attempted but stream was closed
           const writeFileResults = findToolResults(messages, 'write_file');
