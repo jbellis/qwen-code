@@ -2338,7 +2338,7 @@ export class Config {
     const bifrostDir = path.resolve(this.targetDir, '..', 'bifrost');
     return {
       command: path.join(bifrostDir, 'target', 'debug', 'bifrost'),
-      args: ['--root', this.getWorkingDir(), '--server', 'searchtools'],
+      args: ['--root', this.getWorkingDir(), '--server', 'core'],
       cwd: bifrostDir,
       description: 'Bifrost analyzer search tools',
     };

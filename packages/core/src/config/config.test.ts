@@ -694,7 +694,7 @@ describe('Server Config (config.ts)', () => {
       expect(config.getMcpServers()).toMatchObject({
         bifrost: {
           command: '/path/to/bifrost/target/debug/bifrost',
-          args: ['--root', '/tmp', '--server', 'searchtools'],
+          args: ['--root', '/tmp', '--server', 'core'],
           cwd: '/path/to/bifrost',
         },
       });
